@@ -1,6 +1,7 @@
 import { chromium, firefox, webkit } from 'playwright'
 import { createServer } from './server.js'
 import { buildInjectedScript } from './build.js'
+import { convertToPlaywright } from './playwright-converter.js'
 import chalk from 'chalk'
 import fs from 'fs'
 import path from 'path'
@@ -108,13 +109,38 @@ export async function startRecording(options) {
     }
   }
 
-  // Re-inject on frame navigations as a safety net.
-  // addScriptToEvaluateOnNewDocument handles most cases, but this catches
-  // edge cases like about:blank transitions or CDP session quirks.
+  // Track navigations — both for re-injection and for recording navigation events.
+  // This produces the NAVIGATION actions that generateUserFlow attaches as
+  // assertedEvents on the preceding step (e.g. a click that triggers a page load).
   cdpSession.on('Page.frameNavigated', async (params) => {
-    // Only re-inject for the top frame
+    // Only track top-frame navigations
     if (!params.frame.parentId) {
-      // Small delay to let the new document settle
+      const navUrl = params.frame.url
+      // console.log(chalk.blue(`  ↳ Navigation: ${navUrl}`))
+
+      // Don't record the initial navigation (already handled as GOTO)
+      if (navUrl && navUrl !== 'about:blank' && hasGoto) {
+        // Skip if this is the same URL as our initial GOTO
+        const initialGoto = recording.find(r => r.action === 'GOTO')
+        if (!initialGoto || initialGoto.href !== navUrl) {
+          // Get the page title after navigation settles
+          let title = ''
+          try {
+            title = await page.title()
+          } catch (e) { /* page may still be loading */ }
+
+          recording.push({
+            selector: undefined,
+            value: navUrl,
+            title,
+            action: 'NAVIGATION',
+            eventTime: Date.now()
+          })
+          // console.log(chalk.blue(`    ✓ Recorded navigation`))
+        }
+      }
+
+      // Re-inject as safety net
       setTimeout(() => injectRecorder(), 100)
     }
   })
@@ -203,11 +229,27 @@ export async function startRecording(options) {
     // Generate the JSON user flow
     const userFlow = generateUserFlow(recording, options)
 
-    // Write the output
+    // Write the JSON output
     const outputPath = path.resolve(output)
     fs.mkdirSync(path.dirname(outputPath), { recursive: true })
     fs.writeFileSync(outputPath, JSON.stringify(userFlow, null, 2))
-    console.log(chalk.green(`  ✓ Saved to: ${outputPath}\n`))
+    console.log(chalk.green(`  ✓ JSON saved to: ${outputPath}`))
+
+    // Convert to Playwright script via remote service
+    const playwrightPath = outputPath.replace(/\.json$/, '.spec.js')
+    try {
+      console.log(chalk.gray('  Converting to Playwright script...'))
+      const playwrightCode = await convertToPlaywright(userFlow, {
+        cloud: options.cloud,
+        user: options.user,
+        team: options.team
+      })
+      fs.writeFileSync(playwrightPath, playwrightCode)
+      console.log(chalk.green(`  ✓ Playwright script saved to: ${playwrightPath}\n`))
+    } catch (err) {
+      console.log(chalk.yellow(`  ⚠ Playwright conversion failed: ${err.message}`))
+      console.log(chalk.gray(`    JSON was saved — you can retry conversion later.\n`))
+    }
 
     // Cleanup
     server.close()
@@ -216,14 +258,30 @@ export async function startRecording(options) {
   }
 
   // Handle browser close
-  browserInstance.on('disconnected', () => {
+  browserInstance.on('disconnected', async () => {
     if (recording.length > 0) {
       console.log(chalk.yellow('\n  Browser closed. Saving recording...'))
       const userFlow = generateUserFlow(recording, options)
       const outputPath = path.resolve(output)
       fs.mkdirSync(path.dirname(outputPath), { recursive: true })
       fs.writeFileSync(outputPath, JSON.stringify(userFlow, null, 2))
-      console.log(chalk.green(`  ✓ Saved to: ${outputPath}\n`))
+      console.log(chalk.green(`  ✓ JSON saved to: ${outputPath}`))
+
+      // Convert to Playwright script
+      const playwrightPath = outputPath.replace(/\.json$/, '.spec.js')
+      try {
+        console.log(chalk.gray('  Converting to Playwright script...'))
+        const playwrightCode = await convertToPlaywright(userFlow, {
+          cloud: options.cloud,
+          user: options.user,
+          team: options.team
+        })
+        fs.writeFileSync(playwrightPath, playwrightCode)
+        console.log(chalk.green(`  ✓ Playwright script saved to: ${playwrightPath}\n`))
+      } catch (err) {
+        console.log(chalk.yellow(`  ⚠ Playwright conversion failed: ${err.message}`))
+        console.log(chalk.gray(`    JSON was saved — you can retry conversion later.\n`))
+      }
     }
     server.close()
     process.exit(0)
