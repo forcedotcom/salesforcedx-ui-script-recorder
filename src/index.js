@@ -35,7 +35,7 @@ export async function startRecording(options) {
 
   const browserInstance = await browserType.launch({
     headless: headless === true,
-    args: ['--no-sandbox']
+    args: ['--no-sandbox', '--disable-notifications']
   })
 
   const context = await browserInstance.newContext({
