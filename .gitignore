@@ -4,3 +4,5 @@ dist/
 recording.json
 recordings/
 .DS_Store
+auth-state.json
+.chrome-profile/

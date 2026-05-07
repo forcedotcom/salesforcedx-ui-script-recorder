@@ -16,7 +16,9 @@ export async function startRecording(options) {
     browser: browserName,
     dataAttribute,
     viewportWidth,
-    viewportHeight
+    viewportHeight,
+    profileDir,
+    saveAuth
   } = options
 
   // Build the injected script bundle
@@ -33,19 +35,31 @@ export async function startRecording(options) {
   }
   const browserType = browsers.chromium
 
-  const browserInstance = await browserType.launch({
-    headless: headless === true,
-    args: ['--no-sandbox', '--disable-notifications']
-  })
+  let browserInstance = null
+  let context
+  let page
 
-  const context = await browserInstance.newContext({
-    viewport: {
-      width: parseInt(viewportWidth),
-      height: parseInt(viewportHeight)
-    }
-  })
+  if (profileDir) {
+    const userDataDir = path.resolve(profileDir)
+    fs.mkdirSync(userDataDir, { recursive: true })
+    console.log(chalk.gray(`  Profile dir: ${userDataDir}`))
 
-  const page = await context.newPage()
+    context = await browserType.launchPersistentContext(userDataDir, {
+      headless: headless === true,
+      args: ['--no-sandbox', '--disable-notifications'],
+      viewport: { width: parseInt(viewportWidth), height: parseInt(viewportHeight) }
+    })
+    page = context.pages()[0] || await context.newPage()
+  } else {
+    browserInstance = await browserType.launch({
+      headless: headless === true,
+      args: ['--no-sandbox', '--disable-notifications']
+    })
+    context = await browserInstance.newContext({
+      viewport: { width: parseInt(viewportWidth), height: parseInt(viewportHeight) }
+    })
+    page = await context.newPage()
+  }
 
   // Inject the recorder into an ISOLATED world via CDP.
   // This matches how the Chrome extension content scripts work:
@@ -251,16 +265,45 @@ export async function startRecording(options) {
       console.log(chalk.gray(`    JSON was saved — you can retry conversion later.\n`))
     }
 
+    // Save auth state if requested
+    if (saveAuth) {
+      try {
+        const authPath = path.resolve(saveAuth)
+        fs.mkdirSync(path.dirname(authPath), { recursive: true })
+        await context.storageState({ path: authPath })
+        console.log(chalk.green(`  ✓ Auth state saved to: ${authPath}`))
+      } catch (e) {
+        console.log(chalk.yellow(`  ⚠ Could not save auth state: ${e.message}`))
+      }
+    }
+
     // Cleanup
     server.close()
-    await browserInstance.close()
+    if (browserInstance) {
+      await browserInstance.close()
+    } else {
+      await context.close()
+    }
     process.exit(0)
   }
 
-  // Handle browser close
-  browserInstance.on('disconnected', async () => {
+  // Handle browser close (works for both persistent context and regular browser)
+  const onBrowserClose = async () => {
     if (recording.length > 0) {
       console.log(chalk.yellow('\n  Browser closed. Saving recording...'))
+
+      // Try to save auth state before context is fully destroyed
+      if (saveAuth) {
+        try {
+          const authPath = path.resolve(saveAuth)
+          fs.mkdirSync(path.dirname(authPath), { recursive: true })
+          await context.storageState({ path: authPath })
+          console.log(chalk.green(`  ✓ Auth state saved to: ${authPath}`))
+        } catch (e) {
+          console.log(chalk.yellow(`  ⚠ Could not save auth state (browser closed abruptly)`))
+        }
+      }
+
       const userFlow = generateUserFlow(recording, options)
       const outputPath = path.resolve(output)
       fs.mkdirSync(path.dirname(outputPath), { recursive: true })
@@ -285,7 +328,13 @@ export async function startRecording(options) {
     }
     server.close()
     process.exit(0)
-  })
+  }
+
+  if (browserInstance) {
+    browserInstance.on('disconnected', onBrowserClose)
+  } else {
+    context.on('close', onBrowserClose)
+  }
 
   // Navigate to the starting URL
   if (url && url !== 'about:blank') {
