@@ -39,9 +39,9 @@ export class Recorder {
   init() {
     const events = Object.values(eventsToRecord)
 
-    if (!window.__freshRecorderListenersAdded) {
+    if (!window.__sfRecorderListenersAdded) {
       this._addAllListeners(events)
-      window.__freshRecorderListenersAdded = true
+      window.__sfRecorderListenersAdded = true
     }
 
     if (this._isTopFrame) {

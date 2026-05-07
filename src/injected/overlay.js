@@ -33,7 +33,7 @@ export class Overlay {
     this._selectorEl = document.createElement('div')
     this._selectorEl.id = SELECTOR_ID
     this._selectorBox = document.createElement('div')
-    this._selectorBox.className = 'fresh-recorder-selector-box'
+    this._selectorBox.className = 'sf-recorder-selector-box'
     this._selectorEl.appendChild(this._selectorBox)
     this._injectSelectorStyles()
     document.body.appendChild(this._selectorEl)
@@ -325,7 +325,7 @@ export class Overlay {
         pointer-events: none;
         z-index: 2147483646;
       }
-      .fresh-recorder-selector-box {
+      .sf-recorder-selector-box {
         position: fixed;
         background: rgba(73, 149, 255, 0.1);
         border: 2px dashed #1f2d3d;

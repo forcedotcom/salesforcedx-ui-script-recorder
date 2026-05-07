@@ -1,10 +1,10 @@
 {
-  "name": "fresh-ui-recorder",
+  "name": "salesforce-ui-recorder",
   "version": "1.0.0",
   "description": "CLI tool for recording browser interactions with an overlay interface",
   "type": "module",
   "bin": {
-    "fresh-ui-recorder": "./bin/cli.js"
+    "salesforce-ui-recorder": "./bin/cli.js"
   },
   "scripts": {
     "start": "node bin/cli.js",
@@ -17,6 +17,7 @@
     "esbuild": "^0.21.0",
     "lodash-es": "^4.17.21",
     "playwright": "^1.44.0",
+    "prettier": "^3.8.3",
     "ws": "^8.17.0"
   },
   "engines": {

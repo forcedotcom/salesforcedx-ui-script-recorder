@@ -8,7 +8,7 @@ import fs from 'fs'
 import path from 'path'
 
 program
-  .name('fresh-ui-recorder')
+  .name('salesforce-ui-recorder')
   .description('Record browser interactions via a CLI with an in-page overlay')
   .version('1.0.0')
 
@@ -27,7 +27,7 @@ program
   .option('--user <user>', 'Username for Playwright conversion', '')
   .option('--team <team>', 'Team name for Playwright conversion', '')
   .action(async (options) => {
-    console.log(chalk.blue.bold('\n🎬 Fresh UI Recorder\n'))
+    console.log(chalk.blue.bold('\n🎬 Salesforce UI Recorder\n'))
     console.log(chalk.gray(`  URL: ${options.url}`))
     console.log(chalk.gray(`  Output: ${options.output}`))
     console.log(chalk.gray(`  Browser: ${options.browser}\n`))
@@ -49,7 +49,7 @@ program
   .option('--user <user>', 'Username', '')
   .option('--team <team>', 'Team name', '')
   .action(async (input, options) => {
-    console.log(chalk.blue.bold('\n🎬 Fresh UI Recorder — Convert\n'))
+    console.log(chalk.blue.bold('\n🎬 Salesforce UI Recorder — Convert\n'))
 
     const inputPath = path.resolve(input)
     if (!fs.existsSync(inputPath)) {

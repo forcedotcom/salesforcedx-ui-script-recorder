@@ -55,7 +55,7 @@ export async function startRecording(options) {
   const cdpSession = await context.newCDPSession(page)
 
   const initScriptContent = `
-    window.__freshRecorderConfig = {
+    window.__sfRecorderConfig = {
       wsPort: ${port},
       dataAttribute: ${JSON.stringify(dataAttribute || '')}
     };
@@ -67,7 +67,7 @@ export async function startRecording(options) {
 
   await cdpSession.send('Page.addScriptToEvaluateOnNewDocument', {
     source: initScriptContent,
-    worldName: 'FreshRecorderIsolated'
+    worldName: 'SalesforceRecorderIsolated'
   })
 
   // Recording state - viewport is always the first step
@@ -95,7 +95,7 @@ export async function startRecording(options) {
 
       const { executionContextId } = await cdpSession.send('Page.createIsolatedWorld', {
         frameId,
-        worldName: 'FreshRecorderIsolated',
+        worldName: 'SalesforceRecorderIsolated',
         grantUniveralAccess: true
       })
 

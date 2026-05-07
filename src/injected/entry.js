@@ -8,10 +8,10 @@ import { Overlay } from './overlay.js'
 import { Controller } from './controller.js'
 
 ;(function() {
-  if (window.__freshRecorderInjected) return
-  window.__freshRecorderInjected = true
+  if (window.__sfRecorderInjected) return
+  window.__sfRecorderInjected = true
 
-  const config = window.__freshRecorderConfig || {}
+  const config = window.__sfRecorderConfig || {}
   const wsPort = config.wsPort
   const dataAttribute = config.dataAttribute || ''
 
