@@ -39,6 +39,16 @@ export async function startRecording(options) {
   let context
   let page
 
+  const chromiumArgs = [
+    '--no-sandbox',
+    '--disable-notifications',
+    '--disable-infobars',
+    '--disable-features=TranslateUI',
+    '--deny-permission-prompts',
+  ]
+
+  const permissions = ['geolocation', 'notifications', 'camera', 'microphone']
+
   if (profileDir) {
     const userDataDir = path.resolve(profileDir)
     fs.mkdirSync(userDataDir, { recursive: true })
@@ -46,17 +56,19 @@ export async function startRecording(options) {
 
     context = await browserType.launchPersistentContext(userDataDir, {
       headless: headless === true,
-      args: ['--no-sandbox', '--disable-notifications'],
+      args: chromiumArgs,
+      permissions,
       viewport: { width: parseInt(viewportWidth), height: parseInt(viewportHeight) }
     })
     page = context.pages()[0] || await context.newPage()
   } else {
     browserInstance = await browserType.launch({
       headless: headless === true,
-      args: ['--no-sandbox', '--disable-notifications']
+      args: chromiumArgs
     })
     context = await browserInstance.newContext({
-      viewport: { width: parseInt(viewportWidth), height: parseInt(viewportHeight) }
+      viewport: { width: parseInt(viewportWidth), height: parseInt(viewportHeight) },
+      permissions
     })
     page = await context.newPage()
   }

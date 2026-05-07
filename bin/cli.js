@@ -16,7 +16,7 @@ program
   .command('record')
   .description('Launch a browser and start recording user interactions')
   .option('-u, --url <url>', 'Starting URL to navigate to', 'about:blank')
-  .option('-o, --output <path>', 'Output file path for the recording JSON', './recording.json')
+  .option('-o, --output <path>', 'Output file path for the recording JSON')
   .option('--headed', 'Run in headed mode (default)', true)
   .option('--headless', 'Run in headless mode', false)
   .option('--browser <browser>', 'Browser to use (chromium, firefox, webkit)', 'chromium')
@@ -29,6 +29,13 @@ program
   .option('--user <user>', 'Username for Playwright conversion', '')
   .option('--team <team>', 'Team name for Playwright conversion', '')
   .action(async (options) => {
+    // Generate default output path with datetime if not specified
+    if (!options.output) {
+      const now = new Date()
+      const timestamp = now.toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, -5)
+      options.output = `./recordings/recording_${timestamp}.json`
+    }
+
     console.log(chalk.blue.bold('\n🎬 SF UI Recorder\n'))
     console.log(chalk.gray(`  URL: ${options.url}`))
     console.log(chalk.gray(`  Output: ${options.output}`))
