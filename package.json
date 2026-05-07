@@ -1,10 +1,10 @@
 {
-  "name": "salesforce-ui-recorder",
+  "name": "sf-ui-recorder",
   "version": "1.0.0",
   "description": "CLI tool for recording browser interactions with an overlay interface",
   "type": "module",
   "bin": {
-    "salesforce-ui-recorder": "./bin/cli.js"
+    "sf-ui-recorder": "./bin/cli.js"
   },
   "scripts": {
     "start": "node bin/cli.js",
