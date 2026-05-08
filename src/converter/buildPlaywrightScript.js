@@ -8,6 +8,9 @@ import { Stack } from './Stack.js'
 import { BrowserContext } from './BrowserContext.js'
 
 export function getScriptBody(data) {
+  // Reset credential variable tracking for each new conversion
+  ChangeAction.resetDeclaredVars()
+
   const stack = new Stack()
   const context = new BrowserContext()
   const commonCounter = { value: 1 }

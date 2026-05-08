@@ -1,10 +1,14 @@
 import { BaseAction } from './BaseAction.js'
 import { parameteriseStep } from '../parametrise.js'
 
-// Track which credential variables have already been declared
+// Track which credential variables have already been declared within a single conversion
 const declaredVars = new Set()
 
 export class ChangeAction extends BaseAction {
+  static resetDeclaredVars() {
+    declaredVars.clear()
+  }
+
   handle(step) {
     const actions = this.handleNewTabOrWindow(step, 'fill', step.value)
     const selector = step.selectors?.find(sel => sel[0])?.[0]

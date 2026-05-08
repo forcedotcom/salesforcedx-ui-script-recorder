@@ -1,0 +1,46 @@
+{
+  "name": "sf-ui-recorder",
+  "displayName": "SF UI Recorder",
+  "description": "Record browser interactions and generate Playwright tests",
+  "version": "0.1.0",
+  "publisher": "salesforce",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Testing"
+  ],
+  "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sf-ui-recorder.startRecording",
+        "title": "Start UI Recording",
+        "category": "SF UI Recorder"
+      },
+      {
+        "command": "sf-ui-recorder.playbackScript",
+        "title": "Play Recording",
+        "category": "SF UI Recorder",
+        "icon": "$(play)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "sf-ui-recorder.playbackScript",
+          "when": "resourceFilename =~ /\\.spec\\.js$/",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0"
+  }
+}
