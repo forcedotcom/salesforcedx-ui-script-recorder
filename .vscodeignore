@@ -1,0 +1,9 @@
+.vscode/**
+.cursor/**
+.git/**
+.gitignore
+.chrome-profile/**
+recordings/**
+test-results/**
+auth-state.json
+**/*.md

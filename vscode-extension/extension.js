@@ -3,10 +3,14 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+// Output channel for logging
+let outputChannel;
+
 /**
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
+  outputChannel = vscode.window.createOutputChannel('SF UI Recorder');
   const disposable = vscode.commands.registerCommand(
     'sf-ui-recorder.startRecording',
     async () => {
@@ -71,6 +75,12 @@ function activate(context) {
           return new Promise((resolve) => {
             progress.report({ message: `Recording: ${url} — use the overlay controls or press Cancel to stop and save` });
 
+            outputChannel.clear();
+            outputChannel.show(true);
+            outputChannel.appendLine(`> node ${args.join(' ')}`);
+            outputChannel.appendLine(`  cwd: ${path.resolve(__dirname, '..')}`);
+            outputChannel.appendLine('');
+
             const proc = spawn('node', args, {
               cwd: path.resolve(__dirname, '..'),
               stdio: ['ignore', 'pipe', 'pipe'],
@@ -79,11 +89,15 @@ function activate(context) {
             let output = '';
 
             proc.stdout.on('data', (data) => {
-              output += data.toString();
+              const text = data.toString();
+              output += text;
+              outputChannel.append(text);
             });
 
             proc.stderr.on('data', (data) => {
-              output += data.toString();
+              const text = data.toString();
+              output += text;
+              outputChannel.append(text);
             });
 
             token.onCancellationRequested(() => {
@@ -91,6 +105,7 @@ function activate(context) {
             });
 
             proc.on('close', async (code) => {
+              outputChannel.appendLine(`\n[Process exited with code ${code}]`);
               if (code === 0 || code === null) {
                 // Read the recording JSON to count events
                 let eventCount = 0;
@@ -122,6 +137,7 @@ function activate(context) {
             });
 
             proc.on('error', (err) => {
+              outputChannel.appendLine(`\n[Error: ${err.message}]`);
               vscode.window.showErrorMessage(
                 `SF UI Recorder: Failed to start — ${err.message}`
               );

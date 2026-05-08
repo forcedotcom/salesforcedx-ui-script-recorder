@@ -1,14 +1,50 @@
 {
   "name": "sf-ui-recorder",
+  "displayName": "SF UI Recorder",
   "version": "1.0.0",
   "description": "CLI tool for recording browser interactions with an overlay interface",
+  "publisher": "salesforce",
   "type": "module",
+  "main": "./vscode-extension/extension.js",
   "bin": {
     "sf-ui-recorder": "./bin/cli.js"
   },
+  "engines": {
+    "node": ">=18.0.0",
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Testing"
+  ],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "sf-ui-recorder.startRecording",
+        "title": "Start UI Recording",
+        "category": "SF UI Recorder"
+      },
+      {
+        "command": "sf-ui-recorder.playbackScript",
+        "title": "Play Recording",
+        "category": "SF UI Recorder",
+        "icon": "$(play)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "sf-ui-recorder.playbackScript",
+          "when": "resourceFilename =~ /\\.spec\\.js$/",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
   "scripts": {
     "start": "node bin/cli.js",
-    "build:injected": "node scripts/build-injected.js"
+    "build:injected": "node scripts/build-injected.js",
+    "package": "vsce package"
   },
   "dependencies": {
     "@playwright/test": "^1.44.0",
@@ -20,7 +56,7 @@
     "prettier": "^3.8.3",
     "ws": "^8.17.0"
   },
-  "engines": {
-    "node": ">=18.0.0"
+  "devDependencies": {
+    "@types/vscode": "^1.85.0"
   }
 }
