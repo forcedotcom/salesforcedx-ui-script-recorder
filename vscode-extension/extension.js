@@ -101,7 +101,8 @@ function activate(context) {
             });
 
             token.onCancellationRequested(() => {
-              proc.kill('SIGTERM');
+              // Use default signal — SIGTERM on Unix, TerminateProcess on Windows
+              proc.kill();
             });
 
             proc.on('close', async (code) => {
@@ -197,8 +198,9 @@ function activate(context) {
 
       const headed = options.some((opt) => opt.label === headedOption.label);
 
-      // Build playwright command
-      const playwrightArgs = ['playwright', 'test', specPath];
+      // Build playwright command — quote the path for Windows compatibility
+      const quotedSpecPath = `"${specPath}"`;
+      const playwrightArgs = ['playwright', 'test', quotedSpecPath];
 
       if (headed) {
         playwrightArgs.push('--headed');

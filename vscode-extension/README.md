@@ -2,11 +2,31 @@
 
 A lightweight VS Code extension that wraps the `sf-ui-recorder` CLI, letting you record browser interactions and play back generated Playwright tests without leaving your editor.
 
-## Prerequisites
+## Requirements
 
-- Node.js >= 18
-- The `sf-ui-recorder` CLI (parent directory) with dependencies installed (`npm install`)
-- Playwright browsers installed (`npx playwright install chromium`)
+| Requirement | Install | Notes |
+|-------------|---------|-------|
+| **Node.js >= 18** | [nodejs.org](https://nodejs.org) | Required to run the CLI and Playwright |
+| **npm / npx** | Included with Node.js | Used to invoke Playwright for playback |
+| **Project dependencies** | `npm install` | Run from the project root |
+| **Playwright Chromium browser** | `npx playwright install chromium` | Required for both recording and playback |
+
+### Platform Support
+
+The extension works on **macOS**, **Windows**, and **Linux**. After installing Node.js, run:
+
+```bash
+npm install
+npx playwright install chromium
+```
+
+This downloads the correct platform-specific binaries (esbuild, Playwright browser) for your OS automatically.
+
+### Platform Notes
+
+- **macOS** — Works out of the box.
+- **Windows** — Requires Node.js on PATH. Works with both PowerShell and Command Prompt terminals.
+- **Linux** — May require additional system dependencies for Chromium. Run `npx playwright install-deps chromium` to install them.
 
 ## Getting Started
 
@@ -52,11 +72,15 @@ Currently no configurable settings. Future options may include default browser, 
 ## File Structure
 
 ```
-vscode-extension/
-  package.json      Extension manifest (commands, menus, activation)
-  extension.js      Extension entry point (command implementations)
-  .vscodeignore     Packaging exclusions
-  README.md         This file
+fresh-ui-recorder/
+  package.json                 Combined CLI + VS Code extension manifest
+  .vscodeignore                Packaging exclusions for vsce
+  bin/cli.js                   CLI entry point
+  src/                         Recorder and converter source
+  vscode-extension/
+    extension.js               Extension entry point (command implementations)
+    package.json               CommonJS type override for this directory
+    README.md                  This file
 ```
 
 ## Development
@@ -68,8 +92,22 @@ The extension is launched from the project root via the `.vscode/launch.json` co
   "name": "Run Extension",
   "type": "extensionHost",
   "request": "launch",
-  "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode-extension"]
+  "args": ["--extensionDevelopmentPath=${workspaceFolder}"]
 }
 ```
 
 No build step is required — the extension is plain CommonJS JavaScript.
+
+## Packaging
+
+To build a distributable `.vsix` file:
+
+```bash
+npx @vscode/vsce package
+```
+
+This packages the entire project (CLI, source, dependencies) into a single installable file. Install it with:
+
+```bash
+code --install-extension sf-ui-recorder-1.0.0.vsix
+```
