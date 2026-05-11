@@ -179,6 +179,91 @@ function activate(context) {
         return;
       }
 
+      // Check if config and random utility files exist in the recordings directory
+      const recordingsDir = path.dirname(specPath);
+      const configDir = path.join(recordingsDir, 'config');
+      const utilsDir = path.join(recordingsDir, 'utils');
+      const configPath = path.join(configDir, 'config.js');
+      const randomPath = path.join(utilsDir, 'random.js');
+
+      const missingFiles = [];
+      if (!fs.existsSync(configPath)) {
+        missingFiles.push(configPath);
+      }
+      if (!fs.existsSync(randomPath)) {
+        missingFiles.push(randomPath);
+      }
+
+      if (missingFiles.length > 0) {
+        const choice = await vscode.window.showWarningMessage(
+          'SF UI Recorder: The config and/or random utility files required by this script are missing.',
+          'Create Files',
+          'Cancel'
+        );
+
+        if (choice !== 'Create Files') {
+          return;
+        }
+
+        // Create config/config.js
+        if (!fs.existsSync(configPath)) {
+          fs.mkdirSync(configDir, { recursive: true });
+          fs.writeFileSync(
+            configPath,
+            [
+              '/**',
+              ' * Simple config provider for generated Playwright scripts.',
+              ' * Set credentials via environment variables:',
+              ' *   SF_UI_RECORDER_USERNAME, SF_UI_RECORDER_PASSWORD',
+              ' * Or override any key via SF_UI_RECORDER_<KEY> (uppercase).',
+              ' */',
+              'const config = {',
+              '  get(key) {',
+              '    const envKey = `RECORDER_${key.toUpperCase()}`',
+              '    const value = process.env[envKey]',
+              '    if (!value) {',
+              '      throw new Error(',
+              '        `Missing config "${key}". Set environment variable ${envKey} before running the test.`',
+              '      )',
+              '    }',
+              '    return value',
+              '  }',
+              '}',
+              '',
+              'export default config',
+              '',
+            ].join('\n')
+          );
+        }
+
+        // Create utils/random.js
+        if (!fs.existsSync(randomPath)) {
+          fs.mkdirSync(utilsDir, { recursive: true });
+          fs.writeFileSync(
+            randomPath,
+            [
+              '/**',
+              ' * Random utility for generated Playwright scripts.',
+              ' */',
+              'export function randomString(length = 8) {',
+              '  return Math.random().toString(36).substring(2, 2 + length)',
+              '}',
+              '',
+              'export function randomInt(min = 0, max = 100) {',
+              '  return Math.floor(Math.random() * (max - min + 1)) + min',
+              '}',
+              '',
+              'export default { randomString, randomInt }',
+              '',
+            ].join('\n')
+          );
+        }
+
+        vscode.window.showInformationMessage(
+          'SF UI Recorder: Created config/config.js and utils/random.js in recordings folder.'
+        );
+      }
+
       // Show options quick pick
       const headedOption = {
         label: '$(eye) Headed',

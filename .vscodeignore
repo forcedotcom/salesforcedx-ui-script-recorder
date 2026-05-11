@@ -2,8 +2,13 @@
 .cursor/**
 .git/**
 .gitignore
+.gitattributes
 .chrome-profile/**
+.agents/**
+node_modules/**
 recordings/**
 test-results/**
 auth-state.json
+package-lock.json
+*.vsix
 **/*.md

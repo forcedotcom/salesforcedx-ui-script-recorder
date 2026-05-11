@@ -2,8 +2,9 @@
   "name": "sf-ui-recorder",
   "displayName": "SF UI Recorder",
   "version": "1.0.0",
-  "description": "CLI tool for recording browser interactions with an overlay interface",
+  "description": "VS Code Extension wrapping a CLI tool for recording Salesforce UI browser interactions with an overlay interface",
   "publisher": "salesforce",
+  "icon": "images/icon.png",
   "type": "module",
   "main": "./vscode-extension/extension.js",
   "bin": {
