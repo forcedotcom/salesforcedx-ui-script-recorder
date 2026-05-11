@@ -18,11 +18,6 @@ export async function convertToPlaywright(data) {
   const importsAndDeclarations = getImportsAndDeclarations()
   script.push(importsAndDeclarations)
 
-  const delay = `const delay = (ms) => {
-      return new Promise((resolve) => setTimeout(resolve, ms));
-};`
-  script.push(delay)
-
   const scriptStart = `test('${data.title}', async ({ page }) => {`
   script.push(scriptStart)
 
