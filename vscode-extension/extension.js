@@ -219,7 +219,7 @@ function activate(context) {
               ' */',
               'const config = {',
               '  get(key) {',
-              '    const envKey = `RECORDER_${key.toUpperCase()}`',
+              '    const envKey = `SF_UI_RECORDER_${key.toUpperCase()}`',
               '    const value = process.env[envKey]',
               '    if (!value) {',
               '      throw new Error(',
