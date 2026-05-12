@@ -73,14 +73,31 @@ Currently no configurable settings. Future options may include default browser, 
 
 ```
 fresh-ui-recorder/
-  package.json                 Combined CLI + VS Code extension manifest
-  .vscodeignore                Packaging exclusions for vsce
-  bin/cli.js                   CLI entry point
-  src/                         Recorder and converter source
+  package.json                       Combined CLI + VS Code extension manifest
+  .vscodeignore                      Packaging exclusions for vsce
+  bin/cli.js                         CLI entry point
+  src/                               Recorder and converter source
+  images/
+    icon.png                         Extension icon
+    param-icon.svg                   Parameterize action icon
+  recordings/                        Output directory for tests
+    config/config.js                 Config loader for test playback
+    utils/random.js                  Random utility for test playback
   vscode-extension/
-    extension.js               Extension entry point (command implementations)
-    package.json               CommonJS type override for this directory
-    README.md                  This file
+    extension.js                     Extension entry point (activates commands)
+    package.json                     CommonJS type override for this directory
+    parameterize-wizard.js           Step parameterization UI wizard
+    recording-codelens-provider.js   CodeLens actions on recording files
+    decorations.js                   Editor decorations for recordings
+    step-labels.js                   Human-readable step label generation
+    config/config.js                 Runtime config for generated scripts
+    utils/random.js                  Random utility for generated scripts
+    commands/
+      start-recording.js             Start recording command
+      playback.js                    Play recording command
+      parameterize.js                Parameterize step command
+      reconvert.js                   Re-convert recording command
+    README.md                        This file
 ```
 
 ## Development

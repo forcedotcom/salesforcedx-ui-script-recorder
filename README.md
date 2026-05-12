@@ -144,25 +144,65 @@ RECORDER_USERNAME="user@example.com" RECORDER_PASSWORD="pass" npx playwright tes
 
 ```
 sf-ui-recorder/
-├── bin/cli.js                    # CLI entry point
+├── bin/cli.js                        # CLI entry point
 ├── src/
-│   ├── index.js                  # Main orchestrator (Playwright + CDP + WS)
-│   ├── server.js                 # WebSocket server
-│   ├── build.js                  # esbuild bundler for injected scripts
-│   ├── playwright-converter.js   # JSON → Playwright script converter
-│   ├── converter/                # Playwright code generation engine
-│   └── injected/                 # Scripts injected into the browser
-│       ├── entry.js              # IIFE entry (WS, state, init)
-│       ├── recorder.js           # Event capture
-│       ├── selector.js           # Selector generation
-│       ├── finder.js             # CSS uniqueness finder
-│       ├── overlay.js            # Recording UI overlay
-│       └── vendor/               # Shadow DOM traversal utilities
-├── config/config.js              # Config stub for generated scripts
-├── utils/random.js               # Random utility for generated scripts
-├── recordings/                   # Output directory for tests
-├── playwright.config.js          # Playwright test runner config
-└── package.json
+│   ├── index.js                      # Main orchestrator (Playwright + CDP + WS)
+│   ├── server.js                     # WebSocket server
+│   ├── build.js                      # esbuild bundler for injected scripts
+│   ├── playwright-converter.js       # JSON → Playwright script converter
+│   ├── converter/                    # Playwright code generation engine
+│   │   ├── index.js                  # Converter entry point
+│   │   ├── buildPlaywrightScript.js  # Script assembly
+│   │   ├── parametrise.js            # Parameter injection
+│   │   ├── BrowserContext.js         # Browser context tracking
+│   │   ├── Stack.js                  # Frame stack management
+│   │   ├── constants.js              # Converter constants
+│   │   └── scriptHandlers/           # Per-action code generators
+│   │       ├── BaseAction.js         # Shared action base
+│   │       ├── ChangeAction.js       # Input/select changes
+│   │       ├── ClickAction.js        # Click events
+│   │       ├── FrameAction.js        # Frame navigation
+│   │       ├── Header.js             # Test file header/imports
+│   │       ├── KeyboardAction.js     # Keyboard events
+│   │       ├── NavigateAction.js     # Page navigation
+│   │       └── ViewportAction.js     # Viewport resize
+│   └── injected/                     # Scripts injected into the browser
+│       ├── entry.js                  # IIFE entry (WS, state, init)
+│       ├── controller.js             # Recording control logic
+│       ├── recorder.js               # Event capture
+│       ├── selector.js               # Selector generation
+│       ├── finder.js                 # CSS uniqueness finder
+│       ├── overlay.js                # Recording UI overlay
+│       ├── constants.js              # Injected script constants
+│       └── vendor/                   # Shadow DOM traversal utilities
+│           ├── Logger.js             # Logging utility
+│           ├── SelectorComputer.js   # Selector computation
+│           ├── puppeteer/            # Puppeteer-based query selectors
+│           └── selectors/            # Selector strategy implementations
+├── vscode-extension/                 # VS Code extension
+│   ├── extension.js                  # Extension entry point
+│   ├── package.json                  # CommonJS type override
+│   ├── parameterize-wizard.js        # Step parameterization UI
+│   ├── recording-codelens-provider.js # CodeLens for recordings
+│   ├── decorations.js                # Editor decorations
+│   ├── step-labels.js                # Human-readable step labels
+│   ├── config/config.js              # Runtime config for generated scripts
+│   ├── utils/random.js               # Random utility for generated scripts
+│   ├── commands/                     # Command implementations
+│   │   ├── start-recording.js        # Start recording command
+│   │   ├── playback.js               # Play recording command
+│   │   ├── parameterize.js           # Parameterize step command
+│   │   └── reconvert.js              # Re-convert recording command
+│   └── README.md                     # Extension documentation
+├── images/                           # Icons and images
+│   ├── icon.png                      # Extension icon
+│   └── param-icon.svg                # Parameterize action icon
+├── recordings/                       # Output directory for tests
+│   ├── config/config.js              # Config loader for test playback
+│   └── utils/random.js               # Random utility for test playback
+├── playwright.config.js              # Playwright test runner config
+├── .vscodeignore                     # Packaging exclusions for vsce
+└── package.json                      # Combined CLI + VS Code extension manifest
 ```
 
 ## How It Works

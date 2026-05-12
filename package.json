@@ -17,7 +17,10 @@
   "categories": [
     "Testing"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:json",
+    "onLanguage:javascript"
+  ],
   "contributes": {
     "commands": [
       {
@@ -30,6 +33,17 @@
         "title": "Play Recording",
         "category": "SF UI Recorder",
         "icon": "$(play)"
+      },
+      {
+        "command": "sf-ui-recorder.parameterizeStep",
+        "title": "Parameterize Step",
+        "category": "SF UI Recorder"
+      },
+      {
+        "command": "sf-ui-recorder.reconvert",
+        "title": "Re-convert to Playwright",
+        "category": "SF UI Recorder",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
