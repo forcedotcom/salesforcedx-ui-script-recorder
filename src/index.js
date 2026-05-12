@@ -611,11 +611,18 @@ function filterSteps(steps) {
         filteredSteps[lastChangeIndex]?.tagName === step.tagName &&
         filteredSteps[lastChangeIndex]?.inputType === step.inputType
       if (isDuplicate) {
-        filteredSteps.pop()
+        // Remove the previous change and any intermediate keyboard events after it
+        filteredSteps.splice(lastChangeIndex)
         lastChangeIndex = filteredSteps.length
       } else {
         lastChangeIndex = filteredSteps.length
       }
+      filteredSteps.push(step)
+      continue
+    }
+
+    // Skip standalone keyUp events (e.g., Backspace between change events)
+    if (step.type === 'keyUp') {
       filteredSteps.push(step)
       continue
     }
@@ -629,6 +636,8 @@ function filterSteps(steps) {
       }
     }
 
+    // Non-keyboard, non-change steps reset the dedup tracking
+    lastChangeIndex = -1
     filteredSteps.push(step)
   }
 
