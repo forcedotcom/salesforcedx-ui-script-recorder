@@ -4,6 +4,7 @@ const startRecording = require('./commands/start-recording');
 const playback = require('./commands/playback');
 const parameterize = require('./commands/parameterize');
 const reconvert = require('./commands/reconvert');
+const installMcpConfig = require('./commands/install-mcp-config');
 const decorations = require('./decorations');
 
 let outputChannel;
@@ -29,7 +30,8 @@ function activate(context) {
     startRecording.register(context, outputChannel),
     playback.register(context),
     parameterize.register(context, codeLensProvider),
-    reconvert.register(context)
+    reconvert.register(context),
+    installMcpConfig.register(context)
   );
 
   // Register gutter decorations for parameterized steps

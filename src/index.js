@@ -1,4 +1,4 @@
-import { chromium, firefox, webkit } from 'playwright'
+import { chromium } from 'playwright'
 import { createServer } from './server.js'
 import { buildInjectedScript } from './build.js'
 import { convertToPlaywright } from './playwright-converter.js'
@@ -6,7 +6,7 @@ import chalk from 'chalk'
 import fs from 'fs'
 import path from 'path'
 
-const browsers = { chromium, firefox, webkit }
+const browsers = { chromium }
 
 export async function startRecording(options) {
   const {
@@ -30,9 +30,6 @@ export async function startRecording(options) {
   console.log(chalk.gray(`  WebSocket server on port ${port}`))
 
   // Launch the browser — CDP isolated worlds require Chromium
-  if (browserName !== 'chromium') {
-    console.log(chalk.yellow(`  ⚠ CDP isolated world injection requires Chromium. Falling back to chromium.`))
-  }
   const browserType = browsers.chromium
 
   let browserInstance = null

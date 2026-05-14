@@ -19,7 +19,7 @@ program
   .option('-o, --output <path>', 'Output file path for the recording JSON')
   .option('--headed', 'Run in headed mode (default)', true)
   .option('--headless', 'Run in headless mode', false)
-  .option('--browser <browser>', 'Browser to use (chromium, firefox, webkit)', 'chromium')
+  .option('--browser <browser>', 'Browser to use (chromium)', 'chromium')
   .option('--data-attribute <attr>', 'Custom data attribute for selectors', '')
   .option('--viewport-width <width>', 'Viewport width', '1280')
   .option('--viewport-height <height>', 'Viewport height', '720')

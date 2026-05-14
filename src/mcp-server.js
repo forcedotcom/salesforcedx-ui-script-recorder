@@ -64,7 +64,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             browser: {
               type: 'string',
-              enum: ['chromium', 'firefox', 'webkit'],
+              enum: ['chromium'],
               description: 'Browser to use (default: chromium)',
             },
             headless: {

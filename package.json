@@ -44,6 +44,11 @@
         "title": "Re-convert to Playwright",
         "category": "SF UI Recorder",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "sf-ui-recorder.installAgentforceMcpConfig",
+        "title": "Install Agentforce MCP Server Config",
+        "category": "SF UI Recorder"
       }
     ],
     "menus": {
