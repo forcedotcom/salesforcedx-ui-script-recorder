@@ -28,7 +28,7 @@ function register(context) {
       const mcpServerEntry = {
         type: 'stdio',
         command: 'node',
-        args: [path.join(context.extensionPath, 'src', 'mcp-server.js')],
+        args: [path.join(context.extensionPath, 'mcp-server', 'index.js')],
       };
 
       try {

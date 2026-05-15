@@ -5,6 +5,7 @@ const playback = require('./commands/playback');
 const parameterize = require('./commands/parameterize');
 const reconvert = require('./commands/reconvert');
 const installMcpConfig = require('./commands/install-mcp-config');
+const triggerWatcher = require('./trigger-watcher');
 const decorations = require('./decorations');
 
 let outputChannel;
@@ -33,6 +34,9 @@ function activate(context) {
     reconvert.register(context),
     installMcpConfig.register(context)
   );
+
+  // Watch for MCP trigger file (file-based IPC with MCP server)
+  triggerWatcher.register(context, outputChannel);
 
   // Register gutter decorations for parameterized steps
   decorations.register(context);
