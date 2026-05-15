@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
 
 function register(context, outputChannel) {
   return vscode.commands.registerCommand(
@@ -29,6 +30,12 @@ function register(context, outputChannel) {
         fs.mkdirSync(recordingsDir, { recursive: true });
       }
 
+      // Ensure playwright.config.js exists in the workspace
+      const { created } = ensurePlaywrightConfig(workspaceFolder.uri.fsPath);
+      if (created) {
+        outputChannel.appendLine('[SF UI Recorder] Created playwright.config.js in workspace');
+      }
+
       const timestamp = new Date()
         .toISOString()
         .replace(/[:.]/g, '-')
@@ -38,7 +45,8 @@ function register(context, outputChannel) {
 
       const cliPath = path.resolve(__dirname, '..', '..', 'bin', 'cli.js');
       const cliRoot = path.resolve(__dirname, '..', '..');
-      const args = [cliPath, 'record', '--url', url, '--output', outputPath];
+      const authStatePath = path.join(workspaceFolder.uri.fsPath, 'auth-state.json');
+      const args = [cliPath, 'record', '--url', url, '--output', outputPath, '--save-auth', authStatePath];
 
       vscode.window.withProgress(
         {

@@ -2,25 +2,46 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * Resolve the Agentforce MCP settings path cross-platform.
+ * VS Code globalStorage location:
+ *   macOS:   ~/Library/Application Support/Code/User/globalStorage/
+ *   Linux:   ~/.config/Code/User/globalStorage/
+ *   Windows: %APPDATA%/Code/User/globalStorage/
+ */
+function getAgentforceMcpSettingsPath() {
+  const platform = process.platform;
+  let baseDir;
+
+  if (platform === 'darwin') {
+    baseDir = path.join(process.env.HOME || '', 'Library', 'Application Support');
+  } else if (platform === 'win32') {
+    baseDir = process.env.APPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Roaming');
+  } else {
+    // Linux / others
+    baseDir = process.env.XDG_CONFIG_HOME || path.join(process.env.HOME || '', '.config');
+  }
+
+  return path.join(
+    baseDir,
+    'Code',
+    'User',
+    'globalStorage',
+    'salesforce.salesforcedx-einstein-gpt',
+    'settings',
+    'a4d_mcp_settings.json'
+  );
+}
+
 function register(context) {
   return vscode.commands.registerCommand(
     'sf-ui-recorder.installAgentforceMcpConfig',
     async () => {
-      const settingsPath = path.join(
-        process.env.HOME ?? '',
-        'Library',
-        'Application Support',
-        'Code',
-        'User',
-        'globalStorage',
-        'salesforce.salesforcedx-einstein-gpt',
-        'settings',
-        'a4d_mcp_settings.json'
-      );
+      const settingsPath = getAgentforceMcpSettingsPath();
 
-      if (!process.env.HOME) {
+      if (!settingsPath) {
         vscode.window.showErrorMessage(
-          'SF UI Recorder: Could not resolve HOME directory for Agentforce MCP settings.'
+          'SF UI Recorder: Could not resolve Agentforce MCP settings path for this platform.'
         );
         return;
       }

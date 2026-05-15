@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { ensurePlaywrightConfig } = require('./ensure-playwright-config');
 
 const TRIGGER_DIR = '.sf-ui-recorder';
 const TRIGGER_FILE = 'trigger.json';
@@ -85,6 +86,12 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
     fs.mkdirSync(recordingsDir, { recursive: true });
   }
 
+  // Ensure playwright.config.js exists in the workspace
+  const { created } = ensurePlaywrightConfig(workspaceRoot);
+  if (created) {
+    outputChannel.appendLine('[MCP] Created playwright.config.js in workspace');
+  }
+
   const timestamp = new Date()
     .toISOString()
     .replace(/[:.]/g, '-')
@@ -93,13 +100,13 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
   const outputPath = args.output || path.join(recordingsDir, `recording_${timestamp}.json`);
 
   const cliPath = path.resolve(context.extensionPath, 'bin', 'cli.js');
-  const cliArgs = [cliPath, 'record', '--url', args.url || 'about:blank', '--output', outputPath];
+  const authStatePath = args.saveAuth || path.join(workspaceRoot, 'auth-state.json');
+  const cliArgs = [cliPath, 'record', '--url', args.url || 'about:blank', '--output', outputPath, '--save-auth', authStatePath];
 
   if (args.headless) cliArgs.push('--headless');
   if (args.viewportWidth) cliArgs.push('--viewport-width', String(args.viewportWidth));
   if (args.viewportHeight) cliArgs.push('--viewport-height', String(args.viewportHeight));
   if (args.profileDir) cliArgs.push('--profile-dir', args.profileDir);
-  if (args.saveAuth) cliArgs.push('--save-auth', args.saveAuth);
   if (args.cloud) cliArgs.push('--cloud', args.cloud);
   if (args.user) cliArgs.push('--user', args.user);
   if (args.team) cliArgs.push('--team', args.team);

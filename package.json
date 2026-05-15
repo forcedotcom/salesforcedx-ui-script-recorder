@@ -63,7 +63,7 @@
   },
   "scripts": {
     "start": "node bin/cli.js",
-    "mcp": "node src/mcp-server.js",
+    "mcp": "node mcp-server/index.js",
     "build:injected": "node scripts/build-injected.js",
     "package": "vsce package"
   },

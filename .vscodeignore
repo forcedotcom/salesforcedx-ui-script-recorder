@@ -11,3 +11,16 @@ auth-state.json
 package-lock.json
 *.vsix
 **/*.md
+
+# Trim node_modules bloat
+node_modules/**/*.d.ts
+node_modules/**/*.d.ts.map
+node_modules/**/*.js.map
+node_modules/**/*.mjs.map
+node_modules/**/CHANGELOG*
+node_modules/**/HISTORY*
+node_modules/**/test/**
+node_modules/**/tests/**
+node_modules/**/docs/**
+node_modules/**/examples/**
+node_modules/**/.github/**

@@ -2,6 +2,8 @@ import { chromium } from 'playwright'
 import { createServer } from './server.js'
 import { buildInjectedScript } from './build.js'
 import { convertToPlaywright } from './playwright-converter.js'
+import { execFileSync } from 'child_process'
+import { createRequire } from 'module'
 import chalk from 'chalk'
 import fs from 'fs'
 import path from 'path'
@@ -31,6 +33,24 @@ export async function startRecording(options) {
 
   // Launch the browser — CDP isolated worlds require Chromium
   const browserType = browsers.chromium
+
+  // Ensure Chromium is installed using the bundled Playwright CLI
+  // (must match the exact playwright version in our node_modules)
+  const require = createRequire(import.meta.url)
+  const playwrightPkgDir = path.dirname(require.resolve('playwright/package.json'))
+  const playwrightCliPath = path.join(playwrightPkgDir, 'cli.js')
+  const chromiumPath = browserType.executablePath()
+
+  if (!fs.existsSync(chromiumPath)) {
+    console.log(chalk.yellow(`  Chromium not found at: ${chromiumPath}`))
+    console.log(chalk.yellow('  Installing Chromium...'))
+    try {
+      execFileSync(process.execPath, [playwrightCliPath, 'install', 'chromium'], { stdio: 'inherit' })
+      console.log(chalk.green('  ✓ Chromium installed'))
+    } catch (e) {
+      throw new Error(`Failed to install Chromium: ${e.message}. Run "npx playwright install chromium" manually.`)
+    }
+  }
 
   let browserInstance = null
   let context
@@ -63,11 +83,23 @@ export async function startRecording(options) {
       headless: headless === true,
       args: chromiumArgs
     })
+
+    // If auth-state.json exists, load it as storageState so device cookies
+    // (sfdc_lv2) are present — this skips the identity verification screen
+    // while still replaying login steps (since session cookies are stripped).
+    const authStatePath = saveAuth ? path.resolve(saveAuth) : null
+    const hasAuthState = authStatePath && fs.existsSync(authStatePath)
+
     context = await browserInstance.newContext({
       viewport: { width: parseInt(viewportWidth), height: parseInt(viewportHeight) },
-      permissions
+      permissions,
+      ...(hasAuthState && { storageState: authStatePath })
     })
     page = await context.newPage()
+
+    if (hasAuthState) {
+      console.log(chalk.gray(`  Loaded device cookies from: ${authStatePath}`))
+    }
   }
 
   // Inject the recorder into an ISOLATED world via CDP.
@@ -274,13 +306,26 @@ export async function startRecording(options) {
       console.log(chalk.gray(`    JSON was saved — you can retry conversion later.\n`))
     }
 
-    // Save auth state if requested
+    // Save device-identity cookies (sfdc_lv2, BrowserId) for MFA bypass on playback.
+    // We strip session cookies (sid, oid, etc.) so the login steps still execute
+    // but Salesforce skips the identity verification screen.
     if (saveAuth) {
       try {
         const authPath = path.resolve(saveAuth)
         fs.mkdirSync(path.dirname(authPath), { recursive: true })
-        await context.storageState({ path: authPath })
-        console.log(chalk.green(`  ✓ Auth state saved to: ${authPath}`))
+        const fullState = await context.storageState()
+        const deviceState = stripSessionCookies(fullState)
+        fs.writeFileSync(authPath, JSON.stringify(deviceState, null, 2))
+
+        const keptCookies = deviceState.cookies.map(c => c.name)
+        if (keptCookies.length > 0) {
+          console.log(chalk.green(`  ✓ Device identity cookies saved to: ${authPath}`))
+          console.log(chalk.gray(`    Kept: ${keptCookies.join(', ')}`))
+          console.log(chalk.gray(`    (Session cookies stripped — login steps will still replay)`))
+        } else {
+          console.log(chalk.yellow(`  ⚠ No device identity cookies found to save.`))
+          console.log(chalk.gray(`    The auth file was saved but may not bypass MFA.`))
+        }
       } catch (e) {
         console.log(chalk.yellow(`  ⚠ Could not save auth state: ${e.message}`))
       }
@@ -301,13 +346,15 @@ export async function startRecording(options) {
     if (recording.length > 0) {
       console.log(chalk.yellow('\n  Browser closed. Saving recording...'))
 
-      // Try to save auth state before context is fully destroyed
+      // Try to save device-identity cookies before context is fully destroyed
       if (saveAuth) {
         try {
           const authPath = path.resolve(saveAuth)
           fs.mkdirSync(path.dirname(authPath), { recursive: true })
-          await context.storageState({ path: authPath })
-          console.log(chalk.green(`  ✓ Auth state saved to: ${authPath}`))
+          const fullState = await context.storageState()
+          const deviceState = stripSessionCookies(fullState)
+          fs.writeFileSync(authPath, JSON.stringify(deviceState, null, 2))
+          console.log(chalk.green(`  ✓ Device identity cookies saved to: ${authPath}`))
         } catch (e) {
           console.log(chalk.yellow(`  ⚠ Could not save auth state (browser closed abruptly)`))
         }
@@ -591,6 +638,35 @@ function isSpecialKey(key) {
     key === 'Control' ||
     key === 'Tab' ||
     key === 'Backspace'
+}
+
+/**
+ * Strip session cookies from storageState, keeping only device-identity cookies
+ * that allow Salesforce to skip the identity verification screen on login.
+ *
+ * Keeps: sfdc_lv2 (device verified), BrowserId, CookieConsentPolicy, LSKey-c$CookieConsentPolicy
+ * Strips: sid, oid, JSESSIONID, inst, login, and all other session-specific cookies
+ *
+ * Also clears localStorage and sessionStorage origins (which contain session data).
+ */
+function stripSessionCookies(storageState) {
+  // Cookies to KEEP — these identify the device, not the session
+  const DEVICE_COOKIE_NAMES = new Set([
+    'sfdc_lv2',           // Device verified — the key one for MFA bypass
+    'BrowserId',          // Browser identifier
+    'BrowserId_sec',      // Secure browser identifier
+    'CookieConsentPolicy', // Cookie consent
+    'LSKey-c$CookieConsentPolicy', // Lightning cookie consent
+  ])
+
+  const filteredCookies = (storageState.cookies || []).filter(
+    (cookie) => DEVICE_COOKIE_NAMES.has(cookie.name)
+  )
+
+  return {
+    cookies: filteredCookies,
+    origins: [] // Clear localStorage/sessionStorage — only cookies matter for device identity
+  }
 }
 
 function filterSteps(steps) {
