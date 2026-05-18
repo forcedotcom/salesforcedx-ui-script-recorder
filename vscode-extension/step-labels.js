@@ -51,10 +51,6 @@ function getStepDescription(step) {
 function getParamStatusLabel(step) {
   if (!step.params?.parameterise) return null;
 
-  if (step.params.random) {
-    return `Random: ${step.params.dataType || 'unknown'}`;
-  }
-
   if (step.params.paramName) {
     return `Config: ${step.params.paramName}`;
   }

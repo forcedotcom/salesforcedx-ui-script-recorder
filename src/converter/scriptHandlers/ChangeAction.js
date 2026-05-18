@@ -1,5 +1,4 @@
 import { BaseAction } from './BaseAction.js'
-import { parameteriseStep } from '../parametrise.js'
 
 // Track which credential variables have already been declared within a single conversion
 const declaredVars = new Set()
@@ -18,14 +17,11 @@ export class ChangeAction extends BaseAction {
       this._buildUsernameAndPassword(selector, ariaSelector, actions)
     }
 
-    if (step.params?.parameterise && step.params.random) {
-      const parametrisedAction = parameteriseStep(step, this.context.page, selector)
-      actions[actions.length - 1] = parametrisedAction
-    } else if (step.params?.parameterise) {
+    if (step.params?.parameterise) {
       const paramName = step.params.paramName
       if (paramName) {
         const paramAction = `let ${paramName} = config.get('${paramName}');`
-        actions.unshift(paramAction)
+        actions.splice(1, 0, paramAction)
         if (step.inputType === 'checkbox' || step.inputType === 'radio') {
           actions[actions.length - 1] = `await ${this.context.page}.locator('${selector}').setChecked(${paramName} == "true");`
         } else {
@@ -48,13 +44,13 @@ export class ChangeAction extends BaseAction {
   _buildUsernameAndPassword(selector, ariaSelector, actions) {
     if (ariaSelector.startsWith('aria/Username')) {
       if (!declaredVars.has('username')) {
-        actions.unshift(`const username = config.get('username');`)
+        actions.splice(1, 0, `const username = config.get('username');`)
         declaredVars.add('username')
       }
       actions[actions.length - 1] = `await ${this.context.page}.fill('${selector}', username);`
     } else {
       if (!declaredVars.has('password')) {
-        actions.unshift(`const password = config.get('password');`)
+        actions.splice(1, 0, `const password = config.get('password');`)
         declaredVars.add('password')
       }
       actions[actions.length - 1] = `await ${this.context.page}.fill('${selector}', password);`

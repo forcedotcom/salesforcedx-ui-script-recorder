@@ -67,38 +67,24 @@ function register(context) {
 async function ensureUtilityFiles(specPath) {
   const recordingsDir = path.dirname(specPath);
   const configDir = path.join(recordingsDir, 'config');
-  const utilsDir = path.join(recordingsDir, 'utils');
   const configPath = path.join(configDir, 'config.js');
-  const randomPath = path.join(utilsDir, 'random.js');
 
-  const missingFiles = [];
-  if (!fs.existsSync(configPath)) missingFiles.push('config');
-  if (!fs.existsSync(randomPath)) missingFiles.push('random');
-
-  if (missingFiles.length === 0) return;
+  if (fs.existsSync(configPath)) return;
 
   const choice = await vscode.window.showWarningMessage(
-    'SF UI Recorder: The config and/or random utility files required by this script are missing.',
-    'Create Files',
+    'SF UI Recorder: The config file required by this script is missing.',
+    'Create File',
     'Cancel'
   );
 
-  if (choice !== 'Create Files') return;
+  if (choice !== 'Create File') return;
 
-  if (!fs.existsSync(configPath)) {
-    fs.mkdirSync(configDir, { recursive: true });
-    const sourceConfigPath = path.resolve(__dirname, '..', 'config', 'config.js');
-    fs.copyFileSync(sourceConfigPath, configPath);
-  }
-
-  if (!fs.existsSync(randomPath)) {
-    fs.mkdirSync(utilsDir, { recursive: true });
-    const sourceRandomPath = path.resolve(__dirname, '..', 'utils', 'random.js');
-    fs.copyFileSync(sourceRandomPath, randomPath);
-  }
+  fs.mkdirSync(configDir, { recursive: true });
+  const sourceConfigPath = path.resolve(__dirname, '..', 'config', 'config.js');
+  fs.copyFileSync(sourceConfigPath, configPath);
 
   vscode.window.showInformationMessage(
-    'SF UI Recorder: Created config/config.js and utils/random.js in recordings folder.'
+    'SF UI Recorder: Created config/config.js in recordings folder.'
   );
 }
 
