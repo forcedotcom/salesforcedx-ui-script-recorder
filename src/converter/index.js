@@ -38,8 +38,15 @@ export async function convertToPlaywright(data) {
   const scriptEnd = `});`
   script.push(scriptEnd)
 
-  // Add afterEach hook to save updated sfdc_lv2 device cookie for MFA bypass
+  // After each test, persist Salesforce device-identity cookies (especially sfdc_lv2)
+  // to auth-state.json. On subsequent runs, Playwright injects these cookies via
+  // storageState so that Salesforce recognises the browser as a trusted device and
+  // skips the MFA verification prompt — enabling unattended playback.
   const afterEachHook = `
+// Persist Salesforce device-identity cookies (especially sfdc_lv2) to auth-state.json.
+// On subsequent runs, Playwright injects these cookies via storageState so that
+// Salesforce recognises the browser as a trusted device and skips the MFA verification
+// prompt — enabling unattended playback. Do not remove this block.
 test.afterEach(async ({ context }) => {
   const fs = await import('fs');
   const DEVICE_COOKIE_NAMES = ['sfdc_lv2', 'BrowserId', 'BrowserId_sec', 'CookieConsentPolicy', 'LSKey-c\$CookieConsentPolicy'];
