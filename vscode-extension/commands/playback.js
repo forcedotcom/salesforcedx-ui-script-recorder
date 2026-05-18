@@ -27,6 +27,12 @@ function register(context) {
 
       await ensureUtilityFiles(specPath);
 
+      // Parse spec file for config.get('...') parameters
+      const specContent = fs.readFileSync(specPath, 'utf-8');
+      const paramMatches = [...specContent.matchAll(/config\.get\(['"]([^'"]+)['"]\)/g)];
+      const paramNames = [...new Set(paramMatches.map((m) => m[1]))];
+
+      // Build quick pick items: headed option + parameter inputs
       const headedOption = {
         label: '$(eye) Headed',
         description: 'Run with a visible browser window',
@@ -42,6 +48,20 @@ function register(context) {
       if (!options) return;
 
       const headed = options.some((opt) => opt.label === headedOption.label);
+
+      // Prompt for each parameter value
+      const envVars = {};
+      for (const paramName of paramNames) {
+        const envKey = `SF_UI_RECORDER_${paramName.toUpperCase()}`;
+        const value = await vscode.window.showInputBox({
+          title: `Parameter: ${paramName}`,
+          prompt: `Enter value for "${paramName}" (env: ${envKey})`,
+          placeHolder: paramName,
+        });
+        if (value === undefined) return; // user cancelled
+        envVars[envKey] = value;
+      }
+
       const specFileName = path.basename(specPath);
       const playwrightArgs = ['playwright', 'test', specFileName];
 
@@ -56,6 +76,15 @@ function register(context) {
         terminal = vscode.window.createTerminal({
           name: 'SF UI Recorder: Playback',
           cwd: workspaceFolder.uri.fsPath,
+          env: envVars,
+        });
+      } else {
+        // Recreate terminal to pick up new env vars
+        terminal.dispose();
+        terminal = vscode.window.createTerminal({
+          name: 'SF UI Recorder: Playback',
+          cwd: workspaceFolder.uri.fsPath,
+          env: envVars,
         });
       }
       terminal.show();
