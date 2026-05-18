@@ -42,8 +42,8 @@ function register(context) {
       if (!options) return;
 
       const headed = options.some((opt) => opt.label === headedOption.label);
-      const quotedSpecPath = `"${specPath}"`;
-      const playwrightArgs = ['playwright', 'test', quotedSpecPath];
+      const specFileName = path.basename(specPath);
+      const playwrightArgs = ['playwright', 'test', specFileName];
 
       if (headed) {
         playwrightArgs.push('--headed');
