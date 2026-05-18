@@ -20,7 +20,7 @@ npm install
 npx playwright install chromium
 ```
 
-This downloads the correct platform-specific binaries (esbuild, Playwright browser) for your OS automatically.
+This downloads the correct platform-specific Playwright browser binary for your OS automatically.
 
 ### Platform Notes
 
@@ -115,16 +115,50 @@ The extension is launched from the project root via the `.vscode/launch.json` co
 
 No build step is required — the extension is plain CommonJS JavaScript.
 
-## Packaging
+## Building the Extension (.vsix)
 
-To build a distributable `.vsix` file:
+The injected browser script must be pre-built before packaging. This avoids shipping esbuild's platform-specific native binary inside the extension, which would fail on platforms other than the one used to package.
+
+### Quick build
 
 ```bash
+npm install
+npm run build:injected
 npx @vscode/vsce package
 ```
 
-This packages the entire project (CLI, source, dependencies) into a single installable file. Install it with:
+### What each step does
+
+| Step | Command | Purpose |
+|------|---------|---------|
+| 1 | `npm install` | Installs all dependencies (including `esbuild` as a dev dependency) |
+| 2 | `npm run build:injected` | Bundles `src/injected/entry.js` → `dist/injected-bundle.js` using esbuild |
+| 3 | `npx @vscode/vsce package` | Packages everything into `sf-ui-recorder-<version>.vsix` |
+
+> **Note:** `npm run package` runs steps 2 and 3 together (via the `prepackage` lifecycle script), but `vsce` may require explicit invocation depending on your environment.
+
+### What's included in the .vsix
+
+- `dist/injected-bundle.js` — pre-built browser script (read at runtime, no esbuild needed)
+- `src/` — recorder orchestrator and converter
+- `bin/` — CLI entry point
+- `vscode-extension/` — extension commands and UI
+- `images/` — icons
+- `node_modules/` — production dependencies only (esbuild excluded)
+
+### What's excluded (via .vscodeignore)
+
+- `node_modules/esbuild/**` and `node_modules/@esbuild/**` — platform-specific binaries
+- `scripts/**` — build tooling
+- `recordings/**`, `test-results/**`, `.chrome-profile/**` — runtime output
+- `*.md`, `*.vsix`, `auth-state.json` — docs and artifacts
+
+### Installing the built extension
 
 ```bash
 code --install-extension sf-ui-recorder-1.0.0.vsix
 ```
+
+### Cross-platform notes
+
+The packaged `.vsix` works on macOS, Windows, and Linux without modification. At runtime, `src/build.js` reads the static `dist/injected-bundle.js` — no native compilation or platform-specific binary is invoked. The only platform-specific requirement is Playwright's Chromium browser, which users install separately via `npx playwright install chromium`.

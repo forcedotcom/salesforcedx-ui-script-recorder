@@ -7,10 +7,15 @@
 .agents/**
 recordings/**
 test-results/**
+scripts/**
 auth-state.json
 package-lock.json
 *.vsix
 **/*.md
+
+# esbuild is a dev-only dependency — the pre-built dist/ bundle is used at runtime
+node_modules/esbuild/**
+node_modules/@esbuild/**
 
 # Trim node_modules bloat
 node_modules/**/*.d.ts
