@@ -295,7 +295,7 @@ async function ensureUtilityFiles(specPath) {
   fs.copyFileSync(sourceConfigPath, configPath);
 
   vscode.window.showInformationMessage(
-    'SF UI Recorder: Created config/config.js in recordings folder.'
+    'SF UI Recorder: Created config/config.js in test-plans/playwright folder.'
   );
 }
 

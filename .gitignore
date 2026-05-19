@@ -2,7 +2,7 @@ node_modules/
 dist/
 *.json.bak
 recording.json
-recordings/
+test-plans/
 .DS_Store
 auth-state.json
 .chrome-profile/

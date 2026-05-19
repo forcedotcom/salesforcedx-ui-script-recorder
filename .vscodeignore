@@ -5,7 +5,7 @@
 .gitattributes
 .chrome-profile/**
 .agents/**
-recordings/**
+test-plans/**
 test-results/**
 scripts/**
 auth-state.json

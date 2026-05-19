@@ -5,7 +5,7 @@ const authStatePath = './auth-state.json'
 const hasAuthState = fs.existsSync(authStatePath)
 
 export default defineConfig({
-  testDir: './recordings',
+  testDir: './test-plans/playwright',
   timeout: 0,
   use: {
     headless: false,

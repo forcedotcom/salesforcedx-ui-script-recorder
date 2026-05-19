@@ -34,7 +34,7 @@ function register(context, outputChannel) {
         return;
       }
 
-      const recordingsDir = path.join(workspaceFolder.uri.fsPath, 'recordings');
+      const recordingsDir = path.join(workspaceFolder.uri.fsPath, 'test-plans', 'playwright');
       if (!fs.existsSync(recordingsDir)) {
         fs.mkdirSync(recordingsDir, { recursive: true });
       }

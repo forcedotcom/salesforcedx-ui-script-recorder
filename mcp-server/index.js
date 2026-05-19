@@ -160,7 +160,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: 'list_recordings',
         description:
-          'List all available recordings in the project recordings/ directory.',
+          'List all available recordings in the project test-plans/playwright/ directory.',
         inputSchema: {
           type: 'object',
           properties: {},

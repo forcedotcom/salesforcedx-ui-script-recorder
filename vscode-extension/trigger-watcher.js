@@ -81,7 +81,7 @@ function register(context, outputChannel) {
 // ─── Command Handlers ────────────────────────────────────────────────────────
 
 async function handleRecord(args, workspaceRoot, outputChannel, resultPath, context) {
-  const recordingsDir = path.join(workspaceRoot, 'recordings');
+  const recordingsDir = path.join(workspaceRoot, 'test-plans', 'playwright');
   if (!fs.existsSync(recordingsDir)) {
     fs.mkdirSync(recordingsDir, { recursive: true });
   }
@@ -306,7 +306,7 @@ async function handleConvert(args, workspaceRoot, outputChannel, resultPath, con
 }
 
 function handleListRecordings(workspaceRoot, resultPath) {
-  const recordingsDir = path.join(workspaceRoot, 'recordings');
+  const recordingsDir = path.join(workspaceRoot, 'test-plans', 'playwright');
 
   if (!fs.existsSync(recordingsDir)) {
     writeResult(resultPath, { ok: true, recordings: [], count: 0 });
@@ -325,8 +325,8 @@ function handleListRecordings(workspaceRoot, resultPath) {
 
     return {
       name: baseName,
-      jsonFile: path.join('recordings', jsonFile),
-      specFile: hasSpec ? path.join('recordings', `${baseName}.spec.js`) : null,
+      jsonFile: path.join('test-plans', 'playwright', jsonFile),
+      specFile: hasSpec ? path.join('test-plans', 'playwright', `${baseName}.spec.js`) : null,
       size: stats.size,
       modified: stats.mtime.toISOString(),
     };

@@ -16,7 +16,7 @@ npm install
 
 ```bash
 # Record a session
-npx sf-ui-recorder record --url https://myorg.salesforce.com -o ./recordings/test.json
+npx sf-ui-recorder record --url https://myorg.salesforce.com -o ./test-plans/playwright/test.json
 
 # Run the generated Playwright test
 npx playwright test --headed
@@ -55,7 +55,7 @@ npx sf-ui-recorder record \
   --url https://myorg.lightning.force.com \
   --profile-dir ./.chrome-profile \
   --save-auth ./auth-state.json \
-  -o ./recordings/create-account.json
+  -o ./test-plans/playwright/create-account.json
 ```
 
 ### `convert`
@@ -76,7 +76,7 @@ npx sf-ui-recorder convert <input> [options]
 **Example:**
 
 ```bash
-npx sf-ui-recorder convert ./recordings/create-account.json
+npx sf-ui-recorder convert ./test-plans/playwright/create-account.json
 ```
 
 ## Overlay Controls
@@ -110,14 +110,14 @@ npx sf-ui-recorder record \
   --url https://myorg.salesforce.com \
   --profile-dir ./.chrome-profile \
   --save-auth ./auth-state.json \
-  -o ./recordings/test-flow.json
+  -o ./test-plans/playwright/test-flow.json
 
 # Second recording — already authenticated, no login needed
 npx sf-ui-recorder record \
   --url https://myorg.lightning.force.com/lightning/o/Account/list \
   --profile-dir ./.chrome-profile \
   --save-auth ./auth-state.json \
-  -o ./recordings/another-flow.json
+  -o ./test-plans/playwright/another-flow.json
 
 # Playback — auth-state.json is loaded automatically
 npx playwright test --headed
@@ -127,14 +127,14 @@ npx playwright test --headed
 
 ## Running Generated Tests
 
-Generated Playwright scripts are saved to the `recordings/` directory as `.spec.js` files. Run them with:
+Generated Playwright scripts are saved to the `test-plans/playwright/` directory as `.spec.js` files. Run them with:
 
 ```bash
-# Run all recordings
+# Run all tests
 npx playwright test --headed
 
 # Run a specific test
-npx playwright test recordings/create-account.spec.js --headed
+npx playwright test create-account.spec.js --headed
 
 # Set credentials for tests that use username/password fills
 RECORDER_USERNAME="user@example.com" RECORDER_PASSWORD="pass" npx playwright test --headed
@@ -197,9 +197,8 @@ sf-ui-recorder/
 ├── images/                           # Icons and images
 │   ├── icon.png                      # Extension icon
 │   └── param-icon.svg                # Parameterize action icon
-├── recordings/                       # Output directory for tests
-│   ├── config/config.js              # Config loader for test playback
-│   └── utils/random.js               # Random utility for test playback
+├── test-plans/playwright/             # Output directory for tests
+│   └── config/config.js              # Config loader for test playback
 ├── playwright.config.js              # Playwright test runner config
 ├── .vscodeignore                     # Packaging exclusions for vsce
 └── package.json                      # Combined CLI + VS Code extension manifest

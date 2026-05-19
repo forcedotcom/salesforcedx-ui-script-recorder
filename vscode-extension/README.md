@@ -46,10 +46,10 @@ This downloads the correct platform-specific Playwright browser binary for your 
 4. On completion, a notification shows how many events were recorded
 5. The generated `.spec.js` Playwright test file opens automatically
 
-Recordings are saved to a `recordings/` folder in your workspace:
+Recordings are saved to a `test-plans/playwright/` folder in your workspace:
 ```
-<workspace>/recordings/recording_2026-05-08_14-30-22.json
-<workspace>/recordings/recording_2026-05-08_14-30-22.spec.js
+<workspace>/test-plans/playwright/recording_2026-05-08_14-30-22.json
+<workspace>/test-plans/playwright/recording_2026-05-08_14-30-22.spec.js
 ```
 
 ### Play Recording
@@ -80,9 +80,8 @@ fresh-ui-recorder/
   images/
     icon.png                         Extension icon
     param-icon.svg                   Parameterize action icon
-  recordings/                        Output directory for tests
+  test-plans/playwright/              Output directory for tests
     config/config.js                 Config loader for test playback
-    utils/random.js                  Random utility for test playback
   vscode-extension/
     extension.js                     Extension entry point (activates commands)
     package.json                     CommonJS type override for this directory
@@ -150,7 +149,7 @@ npx @vscode/vsce package
 
 - `node_modules/esbuild/**` and `node_modules/@esbuild/**` — platform-specific binaries
 - `scripts/**` — build tooling
-- `recordings/**`, `test-results/**`, `.chrome-profile/**` — runtime output
+- `test-plans/**`, `test-results/**`, `.chrome-profile/**` — runtime output
 - `*.md`, `*.vsix`, `auth-state.json` — docs and artifacts
 
 ### Installing the built extension

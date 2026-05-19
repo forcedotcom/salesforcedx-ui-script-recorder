@@ -33,7 +33,7 @@ program
     if (!options.output) {
       const now = new Date()
       const timestamp = now.toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, -5)
-      options.output = `./recordings/recording_${timestamp}.json`
+      options.output = `./test-plans/playwright/recording_${timestamp}.json`
     }
 
     console.log(chalk.blue.bold('\n🎬 SF UI Recorder\n'))
