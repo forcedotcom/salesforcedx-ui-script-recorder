@@ -8,16 +8,25 @@ function register(context, outputChannel) {
   return vscode.commands.registerCommand(
     'sf-ui-recorder.startRecording',
     async () => {
-      const url = await vscode.window.showInputBox({
-        prompt: 'Enter the URL to record',
+      const DEFAULT_URL = 'https://login.salesforce.com';
+
+      let url = await vscode.window.showInputBox({
+        prompt: 'Enter the URL to record (leave empty for login.salesforce.com)',
         placeHolder: 'https://myorg.salesforce.com',
         validateInput: (value) => {
-          if (!value || !value.trim()) return 'URL is required';
-          try { new URL(value); return null; } catch { return 'Please enter a valid URL'; }
+          if (!value || !value.trim()) return null; // empty is valid — uses default
+          const normalized = value.match(/^https?:\/\//) ? value : `https://${value}`;
+          try { new URL(normalized); return null; } catch { return 'Please enter a valid URL'; }
         },
       });
 
-      if (!url) return;
+      if (url === undefined) return; // user pressed Escape
+
+      // Default to login.salesforce.com if empty, auto-prepend https:// if no protocol
+      url = url.trim() || DEFAULT_URL;
+      if (!url.match(/^https?:\/\//)) {
+        url = `https://${url}`;
+      }
 
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
