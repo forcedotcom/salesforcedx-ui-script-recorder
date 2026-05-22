@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
+const { resolveNodePath } = require('../resolve-node');
 
 function register(context, outputChannel) {
   return vscode.commands.registerCommand(
@@ -73,7 +74,11 @@ function register(context, outputChannel) {
             outputChannel.appendLine(`  cwd: ${cliRoot}`);
             outputChannel.appendLine('');
 
-            const proc = spawn('node', args, {
+            const nodePath = resolveNodePath();
+            outputChannel.appendLine(`  node: ${nodePath}`);
+            outputChannel.appendLine('');
+
+            const proc = spawn(nodePath, args, {
               cwd: cliRoot,
               stdio: ['ignore', 'pipe', 'pipe'],
             });
@@ -104,14 +109,36 @@ function register(context, outputChannel) {
                   await vscode.window.showTextDocument(doc);
                 }
               } else {
-                vscode.window.showErrorMessage(`SF UI Recorder: Process exited with code ${code}.`);
+                const codeDescriptions = {
+                  '-2': 'Process was interrupted (SIGINT). The recording browser may have been closed manually.',
+                  '1': 'The recording script encountered an error. Check the output panel for details.',
+                  '127': 'Command not found. Node.js may not be installed correctly.',
+                };
+                const description = codeDescriptions[String(code)] || 'An unexpected error occurred.';
+                outputChannel.appendLine(`\n[Exit code ${code}]: ${description}`);
+                vscode.window.showErrorMessage(
+                  `SF UI Recorder: Recording stopped — ${description}`,
+                  'Show Output'
+                ).then((choice) => {
+                  if (choice === 'Show Output') outputChannel.show();
+                });
               }
               resolve();
             });
 
             proc.on('error', (err) => {
-              outputChannel.appendLine(`\n[Error: ${err.message}]`);
-              vscode.window.showErrorMessage(`SF UI Recorder: Failed to start — ${err.message}`);
+              const hint = err.code === 'ENOENT'
+                ? `Could not find Node.js at "${nodePath}". Ensure Node is installed and available on your PATH.`
+                : `Failed to start recording process: ${err.message}`;
+              outputChannel.appendLine(`\n[Error] ${hint}`);
+              outputChannel.appendLine(`[Error] Code: ${err.code || 'unknown'}`);
+              outputChannel.appendLine(`[Error] Node path: ${nodePath}`);
+              vscode.window.showErrorMessage(
+                `SF UI Recorder: ${hint}`,
+                'Show Output'
+              ).then((choice) => {
+                if (choice === 'Show Output') outputChannel.show();
+              });
               resolve();
             });
           });

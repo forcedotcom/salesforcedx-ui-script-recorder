@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { ensurePlaywrightConfig } = require('./ensure-playwright-config');
+const { resolveNodePath } = require('./resolve-node');
 
 const TRIGGER_DIR = '.sf-ui-recorder';
 const TRIGGER_FILE = 'trigger.json';
@@ -128,7 +129,10 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
       return new Promise((resolve) => {
         progress.report({ message: `Recording: ${args.url || 'about:blank'} — use the overlay controls or press Cancel to stop` });
 
-        const proc = spawn('node', cliArgs, {
+        const nodePath = resolveNodePath();
+        outputChannel.appendLine(`  node: ${nodePath}`);
+
+        const proc = spawn(nodePath, cliArgs, {
           cwd: workspaceRoot,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -168,14 +172,25 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
               eventCount,
             });
           } else {
-            writeResult(resultPath, { ok: false, error: `Recording process exited with code ${code}` });
+            const codeDescriptions = {
+              '-2': 'Recording was interrupted (browser closed or SIGINT).',
+              '1': 'The recording script encountered an error.',
+              '127': 'Node.js command not found.',
+            };
+            const description = codeDescriptions[String(code)] || `Process exited unexpectedly with code ${code}.`;
+            outputChannel.appendLine(`\n[Exit code ${code}]: ${description}`);
+            writeResult(resultPath, { ok: false, error: description });
           }
           resolve();
         });
 
         proc.on('error', (err) => {
-          outputChannel.appendLine(`\n[Error: ${err.message}]`);
-          writeResult(resultPath, { ok: false, error: err.message });
+          const hint = err.code === 'ENOENT'
+            ? `Could not find Node.js at "${nodePath}". Ensure Node is installed and available on your PATH.`
+            : `Failed to start recording: ${err.message}`;
+          outputChannel.appendLine(`\n[Error] ${hint}`);
+          outputChannel.appendLine(`[Error] Code: ${err.code || 'unknown'}`);
+          writeResult(resultPath, { ok: false, error: hint });
           resolve();
         });
       });
@@ -269,7 +284,10 @@ async function handleConvert(args, workspaceRoot, outputChannel, resultPath, con
         let stdout = '';
         let stderr = '';
 
-        const proc = spawn('node', cliArgs, {
+        const nodePath = resolveNodePath();
+        outputChannel.appendLine(`  node: ${nodePath}`);
+
+        const proc = spawn(nodePath, cliArgs, {
           cwd: workspaceRoot,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -291,13 +309,19 @@ async function handleConvert(args, workspaceRoot, outputChannel, resultPath, con
             );
             writeResult(resultPath, { ok: true, specFile: specPath, output: stdout });
           } else {
-            writeResult(resultPath, { ok: false, error: `Convert exited with code ${code}: ${stderr}` });
+            const details = stderr.trim() || `Exit code ${code}`;
+            outputChannel.appendLine(`\n[Convert failed] ${details}`);
+            writeResult(resultPath, { ok: false, error: `Conversion failed: ${details}` });
           }
           resolve();
         });
 
         proc.on('error', (err) => {
-          writeResult(resultPath, { ok: false, error: err.message });
+          const hint = err.code === 'ENOENT'
+            ? `Could not find Node.js at "${nodePath}". Ensure Node is installed and available on your PATH.`
+            : err.message;
+          outputChannel.appendLine(`\n[Error] ${hint}`);
+          writeResult(resultPath, { ok: false, error: hint });
           resolve();
         });
       });

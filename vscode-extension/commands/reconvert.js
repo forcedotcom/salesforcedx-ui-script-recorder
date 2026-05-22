@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { resolveNodePath } = require('../resolve-node');
 
 function register(context) {
   return vscode.commands.registerCommand(
@@ -25,14 +26,16 @@ function register(context) {
 
       const cliRoot = path.resolve(__dirname, '..', '..');
       const cliPath = path.resolve(cliRoot, 'bin', 'cli.js');
-      const args = [cliPath, 'convert', jsonPath];
 
-      const proc = spawn('node', args, {
+      const nodePath = resolveNodePath();
+      const proc = spawn(nodePath, [cliPath, 'convert', jsonPath], {
         cwd: cliRoot,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
+      let stdout = '';
       let stderr = '';
+      proc.stdout.on('data', (data) => { stdout += data.toString(); });
       proc.stderr.on('data', (data) => { stderr += data.toString(); });
 
       proc.on('close', async (code) => {
@@ -44,12 +47,32 @@ function register(context) {
           }
           vscode.window.showInformationMessage('SF UI Recorder: Playwright script regenerated.');
         } else {
-          vscode.window.showErrorMessage(`SF UI Recorder: Conversion failed — ${stderr.trim()}`);
+          const details = stderr.trim() || stdout.trim() || `Exit code ${code}`;
+          const outputChannel = vscode.window.createOutputChannel('SF UI Recorder');
+          outputChannel.appendLine(`[Convert] Failed with exit code ${code}`);
+          outputChannel.appendLine(`[Convert] Node: ${nodePath}`);
+          outputChannel.appendLine(`[Convert] Command: ${nodePath} ${cliPath} convert ${jsonPath}`);
+          outputChannel.appendLine(`[Convert] stderr: ${stderr}`);
+          outputChannel.appendLine(`[Convert] stdout: ${stdout}`);
+          outputChannel.show(true);
+          vscode.window.showErrorMessage(`SF UI Recorder: Conversion failed — ${details}`, 'Show Output').then((choice) => {
+            if (choice === 'Show Output') outputChannel.show();
+          });
         }
       });
 
       proc.on('error', (err) => {
-        vscode.window.showErrorMessage(`SF UI Recorder: Conversion error — ${err.message}`);
+        const hint = err.code === 'ENOENT'
+          ? `Could not find Node.js at "${nodePath}". Ensure Node is installed and available on your PATH.`
+          : err.message;
+        const outputChannel = vscode.window.createOutputChannel('SF UI Recorder');
+        outputChannel.appendLine(`[Convert] Spawn error: ${err.message}`);
+        outputChannel.appendLine(`[Convert] Error code: ${err.code || 'unknown'}`);
+        outputChannel.appendLine(`[Convert] Node path attempted: ${nodePath}`);
+        outputChannel.show(true);
+        vscode.window.showErrorMessage(`SF UI Recorder: ${hint}`, 'Show Output').then((choice) => {
+          if (choice === 'Show Output') outputChannel.show();
+        });
       });
     }
   );
