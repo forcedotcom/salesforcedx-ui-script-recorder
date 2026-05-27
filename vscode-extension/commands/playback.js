@@ -89,28 +89,13 @@ function register(context) {
         dataCsvFiles,
         userCsvMeta,
         dataCsvMeta,
+        workspacePath,
+        usersDir,
+        dataDir,
+        specPath,
         specFileName: path.basename(specPath),
       });
       if (!result) return;
-
-      // Handle file generation requests from the webview
-      if (result.generateUsersFile) {
-        generateSkeletonCsv(workspacePath, 'user-files', 'users.csv', credentialParams.length > 0 ? credentialParams : ['username', 'password']);
-        vscode.window.showInformationMessage('SF UI Recorder: Created user-files/users.csv');
-        const doc = await vscode.workspace.openTextDocument(path.join(usersDir, 'users.csv'));
-        await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
-        return;
-      }
-
-      if (result.generateDataFile) {
-        const columns = result.columns && result.columns.length > 0 ? result.columns : (dataParams.length > 0 ? dataParams : ['param1', 'param2']);
-        const filename = result.filename || 'data.csv';
-        generateSkeletonCsv(workspacePath, 'data-files', filename, columns);
-        vscode.window.showInformationMessage(`SF UI Recorder: Created data-files/${filename}`);
-        const doc = await vscode.workspace.openTextDocument(path.join(dataDir, filename));
-        await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
-        return;
-      }
 
       const specFileName = path.basename(specPath);
       const playwrightArgs = ['playwright', 'test', specFileName];
@@ -221,6 +206,8 @@ function generateSkeletonCsv(workspacePath, dirName, fileName, columns) {
 }
 
 function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
+  const { credentialParams = [], dataParams = [], workspacePath, usersDir, dataDir, specPath, specFileName = '' } = bulkOptions;
+
   return new Promise((resolve) => {
     const extensionRoot = path.resolve(__dirname, '..', '..');
     const panel = vscode.window.createWebviewPanel(
@@ -229,6 +216,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
       vscode.ViewColumn.Active,
       {
         enableScripts: true,
+        retainContextWhenHidden: true,
         localResourceRoots: [vscode.Uri.file(path.join(extensionRoot, 'images'))],
       }
     );
@@ -237,7 +225,43 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
       vscode.Uri.file(path.join(extensionRoot, 'images', 'icon.png'))
     );
 
-    panel.webview.html = getWebviewHtml(paramNames, cachedValues, iconUri, bulkOptions);
+    let activeMode = 'single';
+    let selectedUserFile = null;
+    let selectedDataFiles = [];
+
+    function refreshPanel() {
+      const freshUserCsvFiles = fs.existsSync(usersDir)
+        ? fs.readdirSync(usersDir).filter((f) => f.endsWith('.csv'))
+        : [];
+      const freshDataCsvFiles = fs.existsSync(dataDir)
+        ? fs.readdirSync(dataDir).filter((f) => f.endsWith('.csv'))
+        : [];
+      const freshUserCsvMeta = {};
+      for (const f of freshUserCsvFiles) {
+        const lines = fs.readFileSync(path.join(usersDir, f), 'utf-8').split('\n').filter((l) => l.trim());
+        freshUserCsvMeta[f] = { rows: Math.max(0, lines.length - 1) };
+      }
+      const freshDataCsvMeta = {};
+      for (const f of freshDataCsvFiles) {
+        const lines = fs.readFileSync(path.join(dataDir, f), 'utf-8').split('\n').filter((l) => l.trim());
+        const headers = lines.length > 0 ? lines[0].split(',').map((h) => h.trim()) : [];
+        freshDataCsvMeta[f] = { columns: headers, rows: Math.max(0, lines.length - 1) };
+      }
+      panel.webview.html = getWebviewHtml(paramNames, cachedValues, iconUri, {
+        ...bulkOptions,
+        userCsvFiles: freshUserCsvFiles,
+        dataCsvFiles: freshDataCsvFiles,
+        userCsvMeta: freshUserCsvMeta,
+        dataCsvMeta: freshDataCsvMeta,
+        usersFileExists: freshUserCsvFiles.length > 0,
+        dataFileExists: freshDataCsvFiles.length > 0,
+        activeMode,
+        selectedUserFile,
+        selectedDataFiles,
+      });
+    }
+
+    refreshPanel();
 
     let resolved = false;
 
@@ -250,25 +274,79 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         resolved = true;
         panel.dispose();
         resolve(null);
+      } else if (message.type === 'openSpecFile') {
+        if (specPath && fs.existsSync(specPath)) {
+          vscode.workspace.openTextDocument(specPath).then((doc) => {
+            vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
+          });
+        }
+      } else if (message.type === 'openFile') {
+        const filePath = path.join(workspacePath, message.data);
+        if (fs.existsSync(filePath)) {
+          vscode.workspace.openTextDocument(filePath).then((doc) => {
+            vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
+          });
+        }
+      } else if (message.type === 'revealFolder') {
+        const folderPath = path.join(workspacePath, message.data);
+        if (fs.existsSync(folderPath)) {
+          vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(folderPath));
+        } else {
+          fs.mkdirSync(folderPath, { recursive: true });
+          vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(folderPath));
+        }
+      } else if (message.type === 'modeChange') {
+        activeMode = message.data;
+      } else if (message.type === 'dataSelectionChange') {
+        selectedDataFiles = message.data;
+      } else if (message.type === 'userSelectionChange') {
+        selectedUserFile = message.data;
       } else if (message.type === 'generateUsersFile') {
-        resolved = true;
-        panel.dispose();
-        resolve({ generateUsersFile: true });
+        const filename = message.data?.filename || 'users.csv';
+        generateSkeletonCsv(workspacePath, 'user-files', filename, credentialParams.length > 0 ? credentialParams : ['username', 'password']);
+        vscode.window.showInformationMessage(`SF UI Recorder: Created user-files/${filename}`);
+        vscode.workspace.openTextDocument(path.join(usersDir, filename)).then((doc) => {
+          vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        });
+        selectedUserFile = filename;
+        refreshPanel();
       } else if (message.type === 'generateDataFile') {
-        resolved = true;
-        panel.dispose();
-        resolve({ generateDataFile: true, columns: message.data?.columns, filename: message.data?.filename });
+        const columns = message.data?.columns?.length > 0 ? message.data.columns : (dataParams.length > 0 ? dataParams : ['param1', 'param2']);
+        const filename = message.data?.filename || 'data.csv';
+        generateSkeletonCsv(workspacePath, 'data-files', filename, columns);
+        vscode.window.showInformationMessage(`SF UI Recorder: Created data-files/${filename}`);
+        vscode.workspace.openTextDocument(path.join(dataDir, filename)).then((doc) => {
+          vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        });
+        selectedDataFiles = [...selectedDataFiles, filename];
+        refreshPanel();
       }
     });
 
+    // Watch CSV directories for changes and refresh
+    const usersPattern = new vscode.RelativePattern(workspacePath, 'user-files/*.csv');
+    const dataPattern = new vscode.RelativePattern(workspacePath, 'data-files/*.csv');
+    const usersWatcher = vscode.workspace.createFileSystemWatcher(usersPattern);
+    const dataWatcher = vscode.workspace.createFileSystemWatcher(dataPattern);
+
+    const onCsvChange = () => { if (!resolved) refreshPanel(); };
+    usersWatcher.onDidChange(onCsvChange);
+    usersWatcher.onDidCreate(onCsvChange);
+    usersWatcher.onDidDelete(onCsvChange);
+    dataWatcher.onDidChange(onCsvChange);
+    dataWatcher.onDidCreate(onCsvChange);
+    dataWatcher.onDidDelete(onCsvChange);
+
     panel.onDidDispose(() => {
+      usersWatcher.dispose();
+      dataWatcher.dispose();
       if (!resolved) resolve(null);
     });
   });
 }
 
 function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}) {
-  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, specFileName = '' } = bulkOptions;
+  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], specFileName = '' } = bulkOptions;
 
   const credentialFields = credentialParams
     .map(
@@ -416,6 +494,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       display: inline-flex;
       margin-bottom: 18px;
       background: var(--vscode-input-background, rgba(128,128,128,0.1));
+      border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.25));
       border-radius: 6px;
       padding: 3px;
       gap: 2px;
@@ -443,13 +522,19 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     }
     .mode-content { display: none; }
     .mode-content.active { display: block; }
+    .dropdown-divider {
+      border: none;
+      border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.3));
+      margin: 6px 0 0;
+    }
     .dropdown-create-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       padding: 8px 10px;
       font-size: 0.85em;
       color: var(--vscode-textLink-foreground, #3794ff);
       cursor: pointer;
-      border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
-      margin-top: 4px;
     }
     .dropdown-create-btn:hover {
       background: rgba(55, 148, 255, 0.1);
@@ -545,6 +630,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       align-items: center;
       gap: 4px;
       font-size: 0.85em;
+      font-family: var(--vscode-editor-font-family, monospace);
       padding: 3px 8px;
       border-radius: 3px;
       background: rgba(128,128,128,0.08);
@@ -556,12 +642,49 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       color: #4ec963;
     }
     .param-icon {
+      font-family: var(--vscode-font-family, sans-serif);
       font-weight: bold;
     }
     .hint {
       font-weight: normal;
       color: var(--vscode-descriptionForeground);
       font-size: 0.9em;
+    }
+    .file-badge {
+      font-weight: normal;
+      font-size: 0.8em;
+      color: var(--vscode-descriptionForeground);
+      background: rgba(128,128,128,0.1);
+      border: 1px solid rgba(128,128,128,0.2);
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      vertical-align: middle;
+      cursor: pointer;
+      transition: all 0.1s ease;
+    }
+    .file-badge:hover {
+      background: rgba(128,128,128,0.2);
+      border-color: rgba(128,128,128,0.4);
+      color: var(--vscode-foreground);
+    }
+    .folder-badge {
+      font-weight: normal;
+      font-size: 0.8em;
+      color: var(--vscode-descriptionForeground);
+      background: rgba(128,128,128,0.1);
+      border: 1px solid rgba(128,128,128,0.2);
+      padding: 1px 6px;
+      border-radius: 3px;
+      margin-left: 6px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      cursor: pointer;
+      transition: all 0.1s ease;
+    }
+    .folder-badge:hover {
+      background: rgba(128,128,128,0.2);
+      border-color: rgba(128,128,128,0.4);
+      color: var(--vscode-foreground);
     }
     .field-error {
       font-size: 0.85em;
@@ -580,7 +703,28 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       border-radius: 4px;
     }
     .cycle-warning-icon {
-      font-size: 1.1em;
+      font-size: 1.3em;
+      align-self: center;
+    }
+    .cycle-warning ul {
+      margin: 4px 0 0;
+      padding-left: 16px;
+      list-style: none;
+    }
+    .cycle-warning li {
+      margin-bottom: 2px;
+    }
+    .cycle-warning li::before {
+      content: '•';
+      margin-right: 6px;
+      opacity: 0.6;
+    }
+    .cycle-warning code {
+      font-family: var(--vscode-editor-font-family, monospace);
+      background: rgba(204, 167, 0, 0.12);
+      padding: 1px 4px;
+      border-radius: 3px;
+      color: #cca700;
     }
     .multi-select {
       position: relative;
@@ -613,9 +757,16 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       opacity: 1;
     }
     .multi-select-arrow {
-      font-size: 0.7em;
       margin-left: 8px;
       opacity: 0.6;
+      width: 6px;
+      height: 6px;
+      border-right: 1.5px solid currentColor;
+      border-bottom: 1.5px solid currentColor;
+      transform: rotate(45deg);
+      display: inline-block;
+      position: relative;
+      top: -2px;
     }
     .multi-select-dropdown {
       display: none;
@@ -639,21 +790,114 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       display: flex;
       align-items: center;
       gap: 8px;
-      padding: 6px 10px;
+      padding: 7px 10px;
       cursor: pointer;
       font-size: inherit;
     }
     .multi-select-option:hover {
       background: var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
     }
-    .multi-select-option input[type="checkbox"] {
-      margin: 0;
-      cursor: pointer;
-    }
     .multi-select-option.selected {
       background: var(--vscode-list-activeSelectionBackground, rgba(55, 148, 255, 0.15));
     }
-    .custom-params-heading {
+    .multi-select-option input[type="checkbox"] {
+      display: none;
+    }
+    .multi-select-option.hidden {
+      display: none;
+    }
+    .chip-trigger {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 8px;
+      min-height: 32px;
+      border: 1px solid var(--vscode-input-border, #ccc);
+      background: var(--vscode-input-background, #fff);
+      border-radius: 3px;
+      cursor: pointer;
+      box-sizing: border-box;
+      max-width: 350px;
+    }
+    .chip-trigger:hover:not(.disabled) {
+      border-color: var(--vscode-focusBorder, #007fd4);
+    }
+    .chip-trigger.disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .chip-trigger .placeholder {
+      color: var(--vscode-input-placeholderForeground, rgba(128,128,128,0.6));
+      font-size: inherit;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--vscode-badge-background, rgba(128,128,128,0.2));
+      color: var(--vscode-badge-foreground, inherit);
+      padding: 2px 6px 2px 8px;
+      border-radius: 3px;
+      font-size: 0.85em;
+    }
+    .chip-remove {
+      cursor: pointer;
+      opacity: 0.6;
+      font-size: 1.1em;
+      line-height: 1;
+      padding: 0 2px;
+    }
+    .chip-remove:hover {
+      opacity: 1;
+    }
+    .chip-trigger .arrow {
+      margin-left: auto;
+      opacity: 0.6;
+      width: 6px;
+      height: 6px;
+      border-right: 1.5px solid currentColor;
+      border-bottom: 1.5px solid currentColor;
+      transform: rotate(45deg);
+      display: inline-block;
+      position: relative;
+      top: -2px;
+    }
+    .warning-file-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      cursor: pointer;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 2px;
+      position: relative;
+      transition: opacity 0.1s ease;
+    }
+    .warning-file-link:hover {
+      opacity: 0.8;
+    }
+    .warning-file-link::after {
+      content: 'Edit CSV';
+      position: absolute;
+      bottom: calc(100% + 4px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--vscode-editorWidget-background, #252526);
+      color: var(--vscode-foreground, #ccc);
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-size: 0.85em;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    }
+    .warning-file-link:hover::after {
+      opacity: 1;
+    }
+    .custom-parameters-heading {
       font-size: 0.8em;
       font-weight: 600;
       text-transform: uppercase;
@@ -669,49 +913,49 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 <body>
   <div class="header">
     <img src="${iconUri}" alt="SF UI Recorder" />
-    <h2>Playback — ${escapeHtml(specFileName)}</h2>
+    <h2>Playback — <span class="file-badge" id="spec-file-link">${escapeHtml(specFileName)}</span></h2>
   </div>
 
   <div class="section">
     <div class="mode-switch">
-      <button id="mode-single" class="active">&#9655; Single Run</button>
-      <button id="mode-bulk">&#9776; Bulk / Parallel</button>
+      <button id="mode-single" class="${activeMode === 'single' ? 'active' : ''}">&#9655; Single Run</button>
+      <button id="mode-bulk" class="${activeMode === 'bulk' ? 'active' : ''}">&#9776; Bulk / Parallel</button>
     </div>
 
-    <div id="single-content" class="mode-content active">
+    <div id="single-content" class="mode-content${activeMode === 'single' ? ' active' : ''}">
       <p class="description">Run the test once with the credentials and parameters below.</p>
       ${paramNames.length > 0 ? `
         ${credentialFields}
         ${dataParams.length > 0 ? `
-        <div class="custom-params-heading">Custom Params</div>
+        <div class="custom-parameters-heading">Custom Parameters</div>
         ${customParamFields}` : ''}
       ` : '<p>No parameters required. Press Run to start.</p>'}
     </div>
 
-    <div id="bulk-content" class="mode-content">
+    <div id="bulk-content" class="mode-content${activeMode === 'bulk' ? ' active' : ''}">
       <p class="description">
-        Run multiple test instances in parallel. Credentials and data are assigned per session from the CSV rows — if there are more sessions than rows, values cycle from the beginning.
+        Run multiple sessions in parallel. Credentials and data are assigned per session from the CSV rows — if there are more sessions than rows, values cycle from the beginning.
       </p>
 
       <div class="field">
-        <label for="users-file-select">User credentials <span class="hint">(user-files/)</span></label>
+        <label for="users-file-select">User credentials <span class="folder-badge" data-folder="user-files">&#128193; user-files/</span></label>
         <div class="multi-select" id="users-file-select">
           <div class="multi-select-trigger" id="users-select-trigger">
-            <span class="multi-select-text">Select user file...</span>
-            <span class="multi-select-arrow">&#9662;</span>
+            <span class="multi-select-text${selectedUserFile ? ' has-selection' : ''}">${selectedUserFile ? escapeHtml(selectedUserFile) : 'Select user file...'}</span>
+            <span class="multi-select-arrow"></span>
           </div>
           <div class="multi-select-dropdown" id="users-select-dropdown">
             ${userCsvFiles.map((f) => `
-              <label class="multi-select-option" data-value="${escapeHtml(f)}" data-rows="${userCsvMeta[f]?.rows || 0}">
+              <label class="multi-select-option${f === selectedUserFile ? ' selected' : ''}" data-value="${escapeHtml(f)}" data-rows="${userCsvMeta[f]?.rows || 0}">
                 <span>${escapeHtml(f)}</span>
               </label>
             `).join('')}
-            <div class="dropdown-create-btn" id="gen-users-btn">+ Create CSV</div>
+            <hr class="dropdown-divider" /><div class="dropdown-create-btn" id="gen-users-btn"><strong style="font-size: 1.2em;">+</strong>&thinsp;Create CSV</div>
           </div>
         </div>
-        <div class="user-count" id="user-count" style="display: none;">
+        <div class="user-count" id="user-count" style="display: ${selectedUserFile ? 'flex' : 'none'};">
           <span class="user-count-icon">&#10003;</span>
-          <span id="user-count-text"></span>
+          <span id="user-count-text">${selectedUserFile ? `${userCsvMeta[selectedUserFile]?.rows || 0} user account${(userCsvMeta[selectedUserFile]?.rows || 0) === 1 ? '' : 's'} loaded` : ''}</span>
         </div>
         <div class="cycle-warning" id="user-cycle-warning" style="display: none;">
           <span class="cycle-warning-icon">&#9888;</span>
@@ -720,35 +964,44 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       </div>
 
       <div class="field">
-        <label for="data-files-select">Custom param data <span class="hint">(data-files/)</span></label>
+        <label for="data-files-select">Custom parameter data <span class="folder-badge" data-folder="data-files">&#128193; data-files/</span></label>
+        ${dataParams.length > 0 ? `
         <div class="multi-select" id="data-files-select">
-          <div class="multi-select-trigger" id="data-select-trigger">
-            <span class="multi-select-text">Select data files...</span>
-            <span class="multi-select-arrow">&#9662;</span>
+          <div class="chip-trigger" id="data-select-trigger">
+            ${selectedDataFiles.length > 0
+              ? selectedDataFiles.map((f) => `<span class="chip" data-value="${escapeHtml(f)}">${escapeHtml(f)} <span class="chip-remove">&times;</span></span>`).join('')
+              : '<span class="placeholder">Select data files...</span>'}
+            <span class="arrow"></span>
           </div>
           <div class="multi-select-dropdown" id="data-select-dropdown">
             ${dataCsvFiles.map((f) => `
-              <label class="multi-select-option">
-                <input type="checkbox" value="${escapeHtml(f)}" data-columns="${escapeHtml(JSON.stringify(dataCsvMeta[f]?.columns || []))}" data-rows="${dataCsvMeta[f]?.rows || 0}" />
+              <label class="multi-select-option${selectedDataFiles.includes(f) ? ' hidden' : ''}" data-value="${escapeHtml(f)}" data-columns="${escapeHtml(JSON.stringify(dataCsvMeta[f]?.columns || []))}" data-rows="${dataCsvMeta[f]?.rows || 0}">
                 <span>${escapeHtml(f)}</span>
               </label>
             `).join('')}
-            <div class="dropdown-create-btn" id="create-data-btn">+ Create CSV</div>
+            <hr class="dropdown-divider" /><div class="dropdown-create-btn" id="create-data-btn"><strong style="font-size: 1.2em;">+</strong>&thinsp;Create CSV</div>
           </div>
         </div>
-        ${dataParams.length > 0 ? `
         <div class="param-coverage" id="param-coverage">
           ${dataParams.map((p) => `<span class="param-item uncovered" data-param="${escapeHtml(p)}"><span class="param-icon">&#10007;</span> ${escapeHtml(p)}</span>`).join('')}
         </div>
-        ` : ''}
+        ` : `
+        <div class="chip-trigger disabled">
+          <span class="placeholder">No custom parameters in this script</span>
+        </div>
+        `}
         <div class="cycle-warning" id="cycle-warning" style="display: none;">
           <span class="cycle-warning-icon">&#9888;</span>
           <span id="cycle-warning-text"></span>
         </div>
+        <div class="cycle-warning" id="overlap-warning" style="display: none;">
+          <span class="cycle-warning-icon">&#9888;</span>
+          <span id="overlap-warning-text"></span>
+        </div>
       </div>
 
       <div class="field">
-        <label for="parallel-count">Parallel scripts</label>
+        <label for="parallel-count">Sessions</label>
         <input type="number" id="parallel-count" min="1" max="100" value="2" style="width: 80px;" />
         <div class="field-error" id="parallel-error" style="display: none;"></div>
       </div>
@@ -763,12 +1016,18 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     const vscode = acquireVsCodeApi();
     const paramNames = ${JSON.stringify(paramNames)};
     const dataParamNames = ${JSON.stringify(dataParams)};
+    const existingUserFiles = ${JSON.stringify(userCsvFiles)};
+    const existingDataFiles = ${JSON.stringify(dataCsvFiles)};
     const runBtn = document.getElementById('run-btn');
     const modeSingleBtn = document.getElementById('mode-single');
     const modeBulkBtn = document.getElementById('mode-bulk');
     const singleContent = document.getElementById('single-content');
     const bulkContent = document.getElementById('bulk-content');
-    let mode = 'single';
+    function makeFileLink(filePath, displayName) {
+      return '<span class="warning-file-link" data-file="' + filePath + '">' + displayName + '</span>';
+    }
+
+    let mode = '${activeMode}';
 
     // User file custom dropdown
     const usersTrigger = document.getElementById('users-select-trigger');
@@ -781,6 +1040,11 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 
     if (usersTrigger && usersDropdown) {
       const options = usersDropdown.querySelectorAll('.multi-select-option');
+      const initialSelected = usersDropdown.querySelector('.multi-select-option.selected');
+      if (initialSelected) {
+        selectedUserFile = initialSelected.dataset.value;
+        selectedUserRows = parseInt(initialSelected.dataset.rows, 10) || 0;
+      }
 
       usersTrigger.addEventListener('click', () => {
         usersDropdown.classList.toggle('open');
@@ -798,6 +1062,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
           usersDropdown.classList.remove('open');
           userCountEl.style.display = 'flex';
           userCountText.textContent = selectedUserRows + ' user account' + (selectedUserRows === 1 ? '' : 's') + ' loaded';
+          vscode.postMessage({ type: 'userSelectionChange', data: selectedUserFile });
           updateCycleWarning();
           validateForm();
         });
@@ -805,7 +1070,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 
       document.getElementById('gen-users-btn').addEventListener('click', () => {
         usersDropdown.classList.remove('open');
-        vscode.postMessage({ type: 'generateUsersFile' });
+        showUsersWizard();
       });
 
       document.addEventListener('click', (e) => {
@@ -821,16 +1086,71 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       });
     }
 
-    // Multi-select dropdown
+    // Chip-based multi-select for data files
     const trigger = document.getElementById('data-select-trigger');
     const dropdown = document.getElementById('data-select-dropdown');
+    let dataSelected = ${JSON.stringify(selectedDataFiles)};
+
+    function getSelectedOptions() {
+      return dataSelected.map((val) => dropdown?.querySelector('.multi-select-option[data-value="' + val + '"]')).filter(Boolean);
+    }
+
+    function renderChips() {
+      const chips = trigger.querySelectorAll('.chip');
+      chips.forEach((c) => c.remove());
+      const placeholder = trigger.querySelector('.placeholder');
+      if (dataSelected.length === 0) {
+        if (!placeholder) {
+          const ph = document.createElement('span');
+          ph.className = 'placeholder';
+          ph.textContent = 'Select data files...';
+          trigger.insertBefore(ph, trigger.querySelector('.arrow'));
+        }
+      } else {
+        if (placeholder) placeholder.remove();
+        const arrow = trigger.querySelector('.arrow');
+        dataSelected.forEach((val) => {
+          const chip = document.createElement('span');
+          chip.className = 'chip';
+          chip.dataset.value = val;
+          chip.innerHTML = val + ' <span class="chip-remove">&times;</span>';
+          trigger.insertBefore(chip, arrow);
+        });
+      }
+      // Hide/show options in dropdown
+      if (dropdown) {
+        dropdown.querySelectorAll('.multi-select-option').forEach((opt) => {
+          opt.classList.toggle('hidden', dataSelected.includes(opt.dataset.value));
+        });
+      }
+    }
+
+    function addDataFile(val) {
+      if (!dataSelected.includes(val)) dataSelected.push(val);
+      renderChips();
+      onDataSelectionChange();
+    }
+
+    function removeDataFile(val) {
+      dataSelected = dataSelected.filter((v) => v !== val);
+      renderChips();
+      onDataSelectionChange();
+    }
+
+    function onDataSelectionChange() {
+      vscode.postMessage({ type: 'dataSelectionChange', data: dataSelected });
+      updateParamCoverage();
+      updateOverlapWarning();
+      updateCycleWarning();
+      validateForm();
+    }
 
     function updateParamCoverage() {
       if (dataParamNames.length === 0) return;
-      const checked = dropdown ? [...dropdown.querySelectorAll('input:checked')] : [];
+      const selectedOpts = getSelectedOptions();
       const coveredColumns = new Set();
-      checked.forEach((cb) => {
-        const cols = JSON.parse(cb.dataset.columns || '[]');
+      selectedOpts.forEach((opt) => {
+        const cols = JSON.parse(opt.dataset.columns || '[]');
         cols.forEach((c) => coveredColumns.add(c));
       });
       dataParamNames.forEach((p) => {
@@ -848,6 +1168,45 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       });
     }
 
+    function updateOverlapWarning() {
+      const warningEl = document.getElementById('overlap-warning');
+      const warningText = document.getElementById('overlap-warning-text');
+      if (!warningEl) return;
+      const selectedOpts = getSelectedOptions();
+      if (selectedOpts.length < 2) {
+        warningEl.style.display = 'none';
+        return;
+      }
+      const fileColumns = {};
+      selectedOpts.forEach((opt) => {
+        const cols = JSON.parse(opt.dataset.columns || '[]');
+        fileColumns[opt.dataset.value] = cols;
+      });
+      const seen = {};
+      const overlaps = {};
+      for (const [file, cols] of Object.entries(fileColumns)) {
+        for (const col of cols) {
+          if (seen[col]) {
+            if (!overlaps[col]) overlaps[col] = [seen[col]];
+            overlaps[col].push(file);
+          } else {
+            seen[col] = file;
+          }
+        }
+      }
+      const overlapKeys = Object.keys(overlaps);
+      if (overlapKeys.length === 0) {
+        warningEl.style.display = 'none';
+        return;
+      }
+      const items = overlapKeys.map((col) => {
+        const lastFile = overlaps[col][overlaps[col].length - 1];
+        return '<li><code>' + col + '</code> — using ' + makeFileLink('data-files/' + lastFile, lastFile) + '</li>';
+      });
+      warningEl.style.display = 'flex';
+      warningText.innerHTML = 'Overlapping columns (last file takes precedence):<ul>' + items.join('') + '</ul>';
+    }
+
     function updateCycleWarning() {
       const parallel = parseInt(parallelInput?.value, 10) || 0;
 
@@ -858,7 +1217,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
         const userRows = selectedUserRows;
         if (userRows > 0 && userRows < parallel) {
           userWarningEl.style.display = 'flex';
-          userWarningText.textContent = 'User file has ' + userRows + ' row' + (userRows === 1 ? '' : 's') + ' but ' + parallel + ' sessions requested — credentials will cycle from the beginning.';
+          userWarningText.innerHTML = makeFileLink('user-files/' + selectedUserFile, selectedUserFile) + ' has ' + userRows + ' row' + (userRows === 1 ? '' : 's') + ' but ' + parallel + ' sessions requested — credentials will cycle.';
         } else {
           userWarningEl.style.display = 'none';
         }
@@ -868,22 +1227,36 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       const dataWarningEl = document.getElementById('cycle-warning');
       const dataWarningText = document.getElementById('cycle-warning-text');
       if (!dataWarningEl) return;
-      const checked = dropdown ? [...dropdown.querySelectorAll('input:checked')] : [];
-      if (checked.length === 0) {
+      const selectedOpts = getSelectedOptions();
+      if (selectedOpts.length === 0) {
         dataWarningEl.style.display = 'none';
         return;
       }
-      const maxDataRows = Math.max(...checked.map((cb) => parseInt(cb.dataset.rows, 10) || 0));
-      if (maxDataRows > 0 && maxDataRows < parallel) {
+      const shortFiles = selectedOpts
+        .filter((opt) => {
+          const rows = parseInt(opt.dataset.rows, 10) || 0;
+          return rows > 0 && rows < parallel;
+        })
+        .map((opt) => {
+          const name = opt.dataset.value;
+          const rows = opt.dataset.rows;
+          return '<li>' + makeFileLink('data-files/' + name, name) + ' — ' + rows + ' row' + (rows === '1' ? '' : 's') + '</li>';
+        });
+      if (shortFiles.length > 0) {
         dataWarningEl.style.display = 'flex';
-        dataWarningText.textContent = 'Data files have ' + maxDataRows + ' row' + (maxDataRows === 1 ? '' : 's') + ' but ' + parallel + ' sessions requested — data will cycle from the beginning.';
+        dataWarningText.innerHTML = parallel + ' sessions requested but these files will cycle:<ul>' + shortFiles.join('') + '</ul>';
       } else {
         dataWarningEl.style.display = 'none';
       }
     }
 
     if (trigger && dropdown) {
-      trigger.addEventListener('click', () => {
+      trigger.addEventListener('click', (e) => {
+        if (e.target.closest('.chip-remove')) {
+          const chip = e.target.closest('.chip');
+          if (chip) removeDataFile(chip.dataset.value);
+          return;
+        }
         dropdown.classList.toggle('open');
       });
       document.addEventListener('click', (e) => {
@@ -891,19 +1264,11 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
           dropdown.classList.remove('open');
         }
       });
-      dropdown.addEventListener('change', () => {
-        const checked = [...dropdown.querySelectorAll('input:checked')];
-        const textEl = trigger.querySelector('.multi-select-text');
-        if (checked.length === 0) {
-          textEl.textContent = 'Select data files...';
-          textEl.classList.remove('has-selection');
-        } else {
-          textEl.textContent = checked.map((cb) => cb.value).join(', ');
-          textEl.classList.add('has-selection');
-        }
-        updateParamCoverage();
-        updateCycleWarning();
-        validateForm();
+      dropdown.querySelectorAll('.multi-select-option').forEach((opt) => {
+        opt.addEventListener('click', () => {
+          addDataFile(opt.dataset.value);
+          dropdown.classList.remove('open');
+        });
       });
     }
 
@@ -913,6 +1278,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       modeBulkBtn.classList.toggle('active', mode === 'bulk');
       singleContent.classList.toggle('active', mode === 'single');
       bulkContent.classList.toggle('active', mode === 'bulk');
+      vscode.postMessage({ type: 'modeChange', data: mode });
       validateForm();
     }
 
@@ -924,10 +1290,10 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
         const hasUsers = selectedUserRows > 0;
         let allParamsCovered = true;
         if (dataParamNames.length > 0) {
-          const checked = dropdown ? [...dropdown.querySelectorAll('input:checked')] : [];
+          const selectedOpts = getSelectedOptions();
           const coveredColumns = new Set();
-          checked.forEach((cb) => {
-            const cols = JSON.parse(cb.dataset.columns || '[]');
+          selectedOpts.forEach((opt) => {
+            const cols = JSON.parse(opt.dataset.columns || '[]');
             cols.forEach((c) => coveredColumns.add(c));
           });
           allParamsCovered = dataParamNames.every((p) => coveredColumns.has(p));
@@ -958,7 +1324,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
         return false;
       }
       if (num > 100) {
-        errorEl.textContent = 'Maximum is 100 parallel scripts.';
+        errorEl.textContent = 'Maximum is 100 sessions.';
         errorEl.style.display = 'block';
         return false;
       }
@@ -970,6 +1336,9 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       document.getElementById('param-' + name).addEventListener('input', validateForm);
     });
 
+    updateParamCoverage();
+    updateOverlapWarning();
+    updateCycleWarning();
     validateForm();
 
     runBtn.addEventListener('click', () => {
@@ -983,9 +1352,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       } else {
         const parallelCount = document.getElementById('parallel-count').value;
         const usersFile = selectedUserFile;
-        const dataCheckboxes = dropdown ? [...dropdown.querySelectorAll('input:checked')] : [];
-        const dataFiles = dataCheckboxes.map((cb) => cb.value);
-        vscode.postMessage({ type: 'run', data: { mode: 'bulk', parallelCount: parseInt(parallelCount, 10), usersFile, dataFiles } });
+        vscode.postMessage({ type: 'run', data: { mode: 'bulk', parallelCount: parseInt(parallelCount, 10), usersFile, dataFiles: dataSelected } });
       }
     });
 
@@ -1014,8 +1381,9 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
             \`).join('')}
           </div>
           <div class="wizard-filename">
-            <label>File name</label>
-            <input type="text" id="wizard-filename" value="data.csv" />
+            <label>File name <span class="hint">(.csv)</span></label>
+            <input type="text" id="wizard-filename" value="data" />
+            <div class="field-error" id="wizard-filename-error" style="display: none;"></div>
           </div>
           <div class="wizard-actions">
             <button class="primary" id="wizard-create">Create</button>
@@ -1025,16 +1393,119 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       \`;
       document.body.appendChild(overlay);
 
+      const input = overlay.querySelector('#wizard-filename');
+      const createBtn = overlay.querySelector('#wizard-create');
+      const errorEl = overlay.querySelector('#wizard-filename-error');
+
+      function validateWizard() {
+        const raw = input.value.trim();
+        if (!raw) {
+          errorEl.textContent = 'File name is required.';
+          errorEl.style.display = 'block';
+          createBtn.disabled = true;
+          return;
+        }
+        const filename = raw.endsWith('.csv') ? raw : raw + '.csv';
+        if (existingDataFiles.includes(filename)) {
+          errorEl.textContent = filename + ' already exists.';
+          errorEl.style.display = 'block';
+          createBtn.disabled = true;
+          return;
+        }
+        errorEl.style.display = 'none';
+        createBtn.disabled = false;
+      }
+
+      input.addEventListener('input', validateWizard);
+      validateWizard();
+
       overlay.querySelector('#wizard-cancel').addEventListener('click', () => {
         overlay.remove();
       });
-      overlay.querySelector('#wizard-create').addEventListener('click', () => {
+      createBtn.addEventListener('click', () => {
+        if (createBtn.disabled) return;
         const selected = [...overlay.querySelectorAll('.wizard-params input:checked')].map((cb) => cb.value);
-        const filename = overlay.querySelector('#wizard-filename').value.trim() || 'data.csv';
+        const raw = input.value.trim() || 'data';
+        const filename = raw.endsWith('.csv') ? raw : raw + '.csv';
         overlay.remove();
         vscode.postMessage({ type: 'generateDataFile', data: { columns: selected, filename } });
       });
     }
+
+    function showUsersWizard() {
+      const overlay = document.createElement('div');
+      overlay.className = 'wizard-overlay';
+      overlay.innerHTML = \`
+        <div class="wizard-panel">
+          <h3>Create Users CSV</h3>
+          <p class="description">This will create a credentials file with username and password columns.</p>
+          <div class="wizard-filename">
+            <label>File name <span class="hint">(.csv)</span></label>
+            <input type="text" id="wizard-users-filename" value="users" />
+            <div class="field-error" id="wizard-users-error" style="display: none;"></div>
+          </div>
+          <div class="wizard-actions">
+            <button class="primary" id="wizard-users-create">Create</button>
+            <button class="secondary" id="wizard-users-cancel">Cancel</button>
+          </div>
+        </div>
+      \`;
+      document.body.appendChild(overlay);
+
+      const input = overlay.querySelector('#wizard-users-filename');
+      const createBtn = overlay.querySelector('#wizard-users-create');
+      const errorEl = overlay.querySelector('#wizard-users-error');
+
+      function validateWizard() {
+        const raw = input.value.trim();
+        if (!raw) {
+          errorEl.textContent = 'File name is required.';
+          errorEl.style.display = 'block';
+          createBtn.disabled = true;
+          return;
+        }
+        const filename = raw.endsWith('.csv') ? raw : raw + '.csv';
+        if (existingUserFiles.includes(filename)) {
+          errorEl.textContent = filename + ' already exists.';
+          errorEl.style.display = 'block';
+          createBtn.disabled = true;
+          return;
+        }
+        errorEl.style.display = 'none';
+        createBtn.disabled = false;
+      }
+
+      input.addEventListener('input', validateWizard);
+      validateWizard();
+
+      overlay.querySelector('#wizard-users-cancel').addEventListener('click', () => {
+        overlay.remove();
+      });
+      createBtn.addEventListener('click', () => {
+        if (createBtn.disabled) return;
+        const raw = input.value.trim() || 'users';
+        const filename = raw.endsWith('.csv') ? raw : raw + '.csv';
+        overlay.remove();
+        vscode.postMessage({ type: 'generateUsersFile', data: { filename } });
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      const specLink = e.target.closest('#spec-file-link');
+      if (specLink) {
+        vscode.postMessage({ type: 'openSpecFile' });
+        return;
+      }
+      const fileLink = e.target.closest('.warning-file-link');
+      if (fileLink) {
+        vscode.postMessage({ type: 'openFile', data: fileLink.dataset.file });
+        return;
+      }
+      const folderBadge = e.target.closest('.folder-badge');
+      if (folderBadge) {
+        vscode.postMessage({ type: 'revealFolder', data: folderBadge.dataset.folder });
+      }
+    });
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !runBtn.disabled) {
