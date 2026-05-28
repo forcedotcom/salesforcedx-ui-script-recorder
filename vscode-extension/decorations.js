@@ -10,66 +10,15 @@ function register(context) {
   });
 
   function updateDecorations(editor) {
-    if (!editor || !editor.document.fileName.match(/recording.*\.json$/)) {
-      return;
+    if (!editor) return;
+
+    const fileName = editor.document.fileName;
+
+    if (fileName.match(/recording.*\.spec\.js$/)) {
+      updateSpecDecorations(editor, paramDecoration);
+    } else if (fileName.match(/recording.*\.json$/)) {
+      updateJsonDecorations(editor, paramDecoration);
     }
-
-    let recording;
-    try {
-      recording = JSON.parse(editor.document.getText());
-    } catch {
-      return;
-    }
-
-    if (!recording?.steps) return;
-
-    const text = editor.document.getText();
-    const lines = text.split('\n');
-    const decorations = [];
-
-    let inSteps = false;
-    let braceDepth = 0;
-    let stepIndex = 0;
-
-    for (let lineNum = 0; lineNum < lines.length; lineNum++) {
-      const line = lines[lineNum];
-
-      if (!inSteps) {
-        if (/"steps"\s*:\s*\[/.test(line)) {
-          inSteps = true;
-          braceDepth = 0;
-          if (line.includes('{')) {
-            braceDepth = 1;
-            if (recording.steps[stepIndex]?.params?.parameterise) {
-              decorations.push({ range: new vscode.Range(lineNum, 0, lineNum, 0) });
-            }
-          }
-        }
-        continue;
-      }
-
-      for (let ch = 0; ch < line.length; ch++) {
-        const c = line[ch];
-        if (c === '{') {
-          braceDepth++;
-          if (braceDepth === 1) {
-            if (recording.steps[stepIndex]?.params?.parameterise) {
-              decorations.push({ range: new vscode.Range(lineNum, 0, lineNum, 0) });
-            }
-          }
-        } else if (c === '}') {
-          braceDepth--;
-          if (braceDepth === 0) stepIndex++;
-        } else if (c === ']' && braceDepth === 0) {
-          inSteps = false;
-          break;
-        }
-      }
-
-      if (!inSteps) break;
-    }
-
-    editor.setDecorations(paramDecoration, decorations);
   }
 
   if (vscode.window.activeTextEditor) {
@@ -85,6 +34,104 @@ function register(context) {
       }
     })
   );
+}
+
+function updateJsonDecorations(editor, paramDecoration) {
+  let recording;
+  try {
+    recording = JSON.parse(editor.document.getText());
+  } catch {
+    return;
+  }
+
+  if (!recording?.steps) return;
+
+  const text = editor.document.getText();
+  const lines = text.split('\n');
+  const decorations = [];
+
+  let inSteps = false;
+  let braceDepth = 0;
+  let stepIndex = 0;
+
+  for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+    const line = lines[lineNum];
+
+    if (!inSteps) {
+      if (/"steps"\s*:\s*\[/.test(line)) {
+        inSteps = true;
+        braceDepth = 0;
+        if (line.includes('{')) {
+          braceDepth = 1;
+          if (recording.steps[stepIndex]?.params?.parameterise) {
+            decorations.push({ range: new vscode.Range(lineNum, 0, lineNum, 0) });
+          }
+        }
+      }
+      continue;
+    }
+
+    for (let ch = 0; ch < line.length; ch++) {
+      const c = line[ch];
+      if (c === '{') {
+        braceDepth++;
+        if (braceDepth === 1) {
+          if (recording.steps[stepIndex]?.params?.parameterise) {
+            decorations.push({ range: new vscode.Range(lineNum, 0, lineNum, 0) });
+          }
+        }
+      } else if (c === '}') {
+        braceDepth--;
+        if (braceDepth === 0) stepIndex++;
+      } else if (c === ']' && braceDepth === 0) {
+        inSteps = false;
+        break;
+      }
+    }
+
+    if (!inSteps) break;
+  }
+
+  editor.setDecorations(paramDecoration, decorations);
+}
+
+function updateSpecDecorations(editor, paramDecoration) {
+  const fs = require('fs');
+  const jsonPath = editor.document.fileName.replace(/\.spec\.js$/, '.json');
+  if (!fs.existsSync(jsonPath)) return;
+
+  let recording;
+  try {
+    recording = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+  } catch {
+    return;
+  }
+
+  if (!recording?.steps) return;
+
+  const changeSteps = [];
+  for (let i = 0; i < recording.steps.length; i++) {
+    if (recording.steps[i].type === 'change') {
+      changeSteps.push(recording.steps[i]);
+    }
+  }
+
+  const text = editor.document.getText();
+  const lines = text.split('\n');
+  const decorations = [];
+  let changeStepIndex = 0;
+
+  for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+    const line = lines[lineNum];
+    if (/await\s+page\.fill\(/.test(line) && changeStepIndex < changeSteps.length) {
+      if (changeSteps[changeStepIndex].params?.parameterise) {
+        decorations.push({ range: new vscode.Range(lineNum, 0, lineNum, 0) });
+      }
+      changeStepIndex++;
+    }
+  }
+
+  editor.setDecorations(paramDecoration, decorations);
 }
 
 module.exports = { register };

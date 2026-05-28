@@ -100,7 +100,7 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
     .slice(0, -5);
   const outputPath = args.output || path.join(recordingsDir, `recording_${timestamp}.json`);
 
-  const cliPath = path.resolve(context.extensionPath, 'bin', 'cli.js');
+  const cliPath = path.resolve(context.extensionPath, 'recorder-cli', 'bin', 'cli.js');
   const authStatePath = args.saveAuth || path.join(workspaceRoot, 'auth-state.json');
   const cliArgs = [cliPath, 'record', '--url', args.url || 'about:blank', '--output', outputPath, '--save-auth', authStatePath];
 
@@ -261,7 +261,7 @@ async function handleConvert(args, workspaceRoot, outputChannel, resultPath, con
     return;
   }
 
-  const cliPath = path.resolve(context.extensionPath, 'bin', 'cli.js');
+  const cliPath = path.resolve(context.extensionPath, 'recorder-cli', 'bin', 'cli.js');
   const cliArgs = [cliPath, 'convert', inputFile];
   if (args.output) cliArgs.push('--output', args.output);
   if (args.cloud) cliArgs.push('--cloud', args.cloud);

@@ -25,7 +25,7 @@ function register(context) {
       }
 
       const cliRoot = path.resolve(__dirname, '..', '..');
-      const cliPath = path.resolve(cliRoot, 'bin', 'cli.js');
+      const cliPath = path.resolve(cliRoot, 'recorder-cli', 'bin', 'cli.js');
 
       const nodePath = resolveNodePath();
       const proc = spawn(nodePath, [cliPath, 'convert', jsonPath], {

@@ -1,7 +1,7 @@
 {
   "name": "sf-ui-recorder",
   "displayName": "SF UI Recorder",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "VS Code Extension wrapping a CLI tool for recording Salesforce UI browser interactions with an overlay interface",
   "publisher": "salesforce",
   "license": "BSD-3-Clause",
@@ -10,10 +10,11 @@
     "url": "git@git.soma.salesforce.com:joseph-reusing/sf-ui-recorder.git"
   },
   "icon": "images/icon.png",
+  "readme": "README.md",
   "type": "module",
   "main": "./vscode-extension/extension.js",
   "bin": {
-    "sf-ui-recorder": "./bin/cli.js"
+    "sf-ui-recorder": "./recorder-cli/bin/cli.js"
   },
   "engines": {
     "node": ">=18.0.0",
@@ -67,9 +68,9 @@
     }
   },
   "scripts": {
-    "start": "node bin/cli.js",
+    "start": "node recorder-cli/bin/cli.js",
     "mcp": "node mcp-server/index.js",
-    "build:injected": "node scripts/build-injected.js",
+    "build:injected": "node recorder-cli/scripts/build-injected.js",
     "prepackage": "npm run build:injected",
     "package": "vsce package"
   },

@@ -53,7 +53,7 @@ function register(context, outputChannel) {
         .slice(0, -5);
       const outputPath = path.join(recordingsDir, `recording_${timestamp}.json`);
 
-      const cliPath = path.resolve(__dirname, '..', '..', 'bin', 'cli.js');
+      const cliPath = path.resolve(__dirname, '..', '..', 'recorder-cli', 'bin', 'cli.js');
       const cliRoot = path.resolve(__dirname, '..', '..');
       const authStatePath = path.join(workspaceFolder.uri.fsPath, 'auth-state.json');
       const args = [cliPath, 'record', '--url', url, '--output', outputPath, '--save-auth', authStatePath];
