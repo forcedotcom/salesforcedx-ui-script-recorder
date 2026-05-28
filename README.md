@@ -293,7 +293,7 @@ Parameterized steps are marked with a teal icon in the editor gutter and highlig
 
 ![Gutter decoration icons for parameterized steps](images/onboarding/gutter-decorations.png)
 
-![Gutter decoration icons for parameterized steps](images/onboarding/gutter-decorations.png)
+![Gutter decoration icons for parameterized steps](images/onboarding/gutter-decorations-spec.png)
 
 ---
 
