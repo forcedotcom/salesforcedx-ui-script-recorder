@@ -3,6 +3,7 @@
 import { program } from 'commander'
 import { startRecording } from '../src/index.js'
 import { convertToPlaywright } from '../src/playwright-converter.js'
+import { generateReport } from '../src/report.js'
 import chalk from 'chalk'
 import fs from 'fs'
 import path from 'path'
@@ -89,6 +90,15 @@ program
       console.error(chalk.red(`  Error: ${err.message}\n`))
       process.exit(1)
     }
+  })
+
+program
+  .command('report')
+  .description('Show test results from previous playback runs')
+  .option('-a, --all', 'Show all runs (default: latest only)')
+  .option('--json', 'Output raw JSON')
+  .action((options) => {
+    generateReport({ last: !options.all, all: options.all, json: options.json })
   })
 
 program.parse()
