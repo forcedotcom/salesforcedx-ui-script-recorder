@@ -611,6 +611,17 @@ function generateUserFlow(events, options) {
           })
         }
         break
+      case 'assert':
+        steps.push({
+          type: 'assert',
+          target: 'main',
+          selectors: selectors || [],
+          assertionType: event.assertionType || 'visible',
+          textContent: event.textContent || null,
+          tagName,
+          duration: delay
+        })
+        break
       case 'SCREENSHOT':
         steps.push({
           type: 'screenshot',

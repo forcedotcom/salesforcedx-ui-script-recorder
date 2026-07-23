@@ -23,6 +23,7 @@ import { Controller } from './controller.js'
     screenshotMode: false,
     screenshotClippedMode: false,
     hasRecorded: false,
+    hasAsserted: false,
     dataAttribute,
     recording: []
   }

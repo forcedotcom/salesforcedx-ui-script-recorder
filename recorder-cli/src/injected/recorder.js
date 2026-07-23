@@ -85,6 +85,32 @@ export class Recorder {
     // Only record user-initiated actions
     if (!e.isTrusted) return
 
+    // Shift+Click captures an assertion instead of a normal action
+    if ((e.type === 'click' || e.type === 'dblclick') && e.shiftKey) {
+      e.preventDefault()
+      e.stopPropagation()
+
+      const selectors = getSelector(e, { dataAttribute: this._state.dataAttribute })
+      if (!selectors) return
+
+      const target = e.target
+      const rawText = target.innerText?.trim() || ''
+      const textContent = rawText.length > 0 && rawText.length <= 200 ? rawText : ''
+
+      this._sendMessage({
+        selectors,
+        action: 'assert',
+        assertionType: textContent ? 'containsText' : 'visible',
+        textContent: textContent || null,
+        tagName: target.tagName,
+        eventTime: Date.now()
+      })
+
+      this._state.hasAsserted = true
+      setTimeout(() => { this._state.hasAsserted = false }, 400)
+      return
+    }
+
     // Deduplicate by timestamp
     if (this._previousEvent && this._previousEvent.timeStamp === e.timeStamp) return
 

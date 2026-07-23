@@ -45,6 +45,11 @@ function getStepDescription(step) {
     return `click ${label}`;
   }
 
+  if (step.type === 'assert') {
+    const kind = step.assertionType === 'containsText' ? 'text' : 'visible'
+    return `assert ${kind}: ${label}`;
+  }
+
   return label;
 }
 

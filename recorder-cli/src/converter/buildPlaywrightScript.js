@@ -1,3 +1,4 @@
+import { AssertAction } from './scriptHandlers/AssertAction.js'
 import { ClickAction } from './scriptHandlers/ClickAction.js'
 import { ChangeAction } from './scriptHandlers/ChangeAction.js'
 import { FrameAction } from './scriptHandlers/FrameAction.js'
@@ -17,6 +18,7 @@ export function getScriptBody(data) {
   stack.push('page')
 
   const actionsMap = new Map([
+    ['assert', (stack, context, commonCounter) => new AssertAction(stack, context, commonCounter, data)],
     ['click', (stack, context, commonCounter) => new ClickAction(stack, context, commonCounter, data)],
     ['doubleClick', (stack, context, commonCounter) => new ClickAction(stack, context, commonCounter, data)],
     ['change', (stack, context, commonCounter) => new ChangeAction(stack, context, commonCounter, data)],
