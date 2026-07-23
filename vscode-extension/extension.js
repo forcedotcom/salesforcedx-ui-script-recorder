@@ -5,6 +5,7 @@ const playback = require('./commands/playback');
 const parameterize = require('./commands/parameterize');
 const reconvert = require('./commands/reconvert');
 const installMcpConfig = require('./commands/install-mcp-config');
+const resultsViewer = require('./commands/results-viewer');
 const triggerWatcher = require('./trigger-watcher');
 const decorations = require('./decorations');
 
@@ -26,13 +27,21 @@ function activate(context) {
     )
   );
 
+  // Refresh CodeLenses when playback results change, so the "View Playback
+  // Results" lens appears/disappears promptly after a run completes.
+  const resultsWatcher = vscode.workspace.createFileSystemWatcher('**/playback-results/**');
+  resultsWatcher.onDidCreate(() => codeLensProvider.refresh());
+  resultsWatcher.onDidDelete(() => codeLensProvider.refresh());
+  context.subscriptions.push(resultsWatcher);
+
   // Register commands
   context.subscriptions.push(
     startRecording.register(context, outputChannel),
     playback.register(context),
     parameterize.register(context, codeLensProvider),
     reconvert.register(context),
-    installMcpConfig.register(context)
+    installMcpConfig.register(context),
+    resultsViewer.register(context)
   );
 
   // Watch for MCP trigger file (file-based IPC with MCP server)

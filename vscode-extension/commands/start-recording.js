@@ -41,7 +41,7 @@ function register(context, outputChannel) {
       }
 
       // Ensure playwright.config.js exists in the workspace
-      const { created } = ensurePlaywrightConfig(workspaceFolder.uri.fsPath);
+      const { created } = ensurePlaywrightConfig(workspaceFolder.uri.fsPath, context.extensionPath);
       if (created) {
         outputChannel.appendLine('[SF UI Recorder] Created playwright.config.js in workspace');
       }

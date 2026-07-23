@@ -55,6 +55,12 @@
         "command": "sf-ui-recorder.installAgentforceMcpConfig",
         "title": "Install Agentforce MCP Server Config",
         "category": "SF UI Recorder"
+      },
+      {
+        "command": "sf-ui-recorder.viewResults",
+        "title": "View Playback Results",
+        "category": "SF UI Recorder",
+        "icon": "$(graph)"
       }
     ],
     "menus": {

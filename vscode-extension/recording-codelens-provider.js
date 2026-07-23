@@ -85,23 +85,29 @@ class RecordingCodeLensProvider {
   }
 
   _provideSpecLenses(document) {
+    const lenses = [];
+
+    // Top-of-file lens to view playback results, shown only when this spec has
+    // associated result folders in playback-results/.
+    const resultsLens = this._buildResultsLens(document);
+    if (resultsLens) lenses.push(resultsLens);
+
     // Find the corresponding JSON file
     const jsonPath = document.fileName.replace(/\.spec\.js$/, '.json');
     if (!fs.existsSync(jsonPath)) {
-      return [];
+      return lenses;
     }
 
     let recording;
     try {
       recording = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
     } catch {
-      return [];
+      return lenses;
     }
 
-    if (!recording?.steps) return [];
+    if (!recording?.steps) return lenses;
 
     const jsonUri = vscode.Uri.file(jsonPath);
-    const lenses = [];
     const text = document.getText();
     const lines = text.split('\n');
 
@@ -155,6 +161,49 @@ class RecordingCodeLensProvider {
     }
 
     return lenses;
+  }
+
+  // Returns a "View Playback Results" CodeLens for the top of a spec file when
+  // that spec has at least one matching result folder, otherwise null.
+  _buildResultsLens(document) {
+    const workspaceFolder =
+      vscode.workspace.getWorkspaceFolder(document.uri) ||
+      vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) return null;
+
+    const resultsDir = path.join(workspaceFolder.uri.fsPath, 'playback-results');
+    if (!fs.existsSync(resultsDir)) return null;
+
+    // Spec name is the file basename without the .spec.js suffix; result folders
+    // are named "<specName>---...". Match on the first "---" segment exactly.
+    const specName = path.basename(document.fileName).replace(/\.spec\.js$/, '');
+
+    let hasResults = false;
+    try {
+      const entries = fs.readdirSync(resultsDir);
+      hasResults = entries.some((entry) => {
+        if (entry.split('---')[0] !== specName) return false;
+        const full = path.join(resultsDir, entry);
+        try {
+          return (
+            fs.statSync(full).isDirectory() &&
+            fs.existsSync(path.join(full, 'results.json'))
+          );
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      return null;
+    }
+
+    if (!hasResults) return null;
+
+    return new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
+      title: '$(graph) View Playback Results',
+      command: 'sf-ui-recorder.viewResults',
+      arguments: [document.uri],
+    });
   }
 }
 

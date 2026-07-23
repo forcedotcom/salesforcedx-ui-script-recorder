@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
 
 // Session cache for parameter values (cleared when extension reloads)
 const paramCache = new Map();
@@ -10,6 +11,27 @@ const CREDENTIAL_PARAMS = new Set(['username', 'password', 'user', 'pass', 'emai
 
 function isCredentialParam(name) {
   return CREDENTIAL_PARAMS.has(name.toLowerCase());
+}
+
+// True when playback-results/ contains at least one completed run whose folder
+// matches this spec (folders are named "<specName>---..." with a results.json).
+function specHasResults(workspacePath, specPath) {
+  const resultsDir = path.join(workspacePath, 'playback-results');
+  if (!fs.existsSync(resultsDir)) return false;
+  const specName = path.basename(specPath).replace(/\.spec\.js$/, '');
+  try {
+    return fs.readdirSync(resultsDir).some((entry) => {
+      if (entry.split('---')[0] !== specName) return false;
+      const full = path.join(resultsDir, entry);
+      try {
+        return fs.statSync(full).isDirectory() && fs.existsSync(path.join(full, 'results.json'));
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
 }
 
 function register(context) {
@@ -35,6 +57,7 @@ function register(context) {
         return;
       }
 
+      ensurePlaywrightConfig(workspaceFolder.uri.fsPath, context.extensionPath);
       await ensureUtilityFiles(specPath);
 
       // Parse spec file for config.get('...') parameters
@@ -132,8 +155,13 @@ function register(context) {
           );
         }
 
+        const batchId = Date.now().toString(36);
+
         for (let i = 0; i < count; i++) {
-          const envVars = {};
+          const envVars = {
+            SF_UI_RECORDER_BATCH_ID: batchId,
+            SF_UI_RECORDER_SESSION_INDEX: String(i + 1),
+          };
           const userRow = userRowCount > 0 ? userRows[i % userRowCount] : {};
           for (const [key, value] of Object.entries(userRow)) {
             envVars[`SF_UI_RECORDER_${key.toUpperCase()}`] = value;
@@ -255,6 +283,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         dataCsvMeta: freshDataCsvMeta,
         usersFileExists: freshUserCsvFiles.length > 0,
         dataFileExists: freshDataCsvFiles.length > 0,
+        hasResults: specHasResults(workspacePath, specPath),
         activeMode,
         selectedUserFile,
         selectedDataFiles,
@@ -280,6 +309,9 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
             vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
           });
         }
+      } else if (message.type === 'openHistory') {
+        // Open the Playback Results panel focused on this spec's runs.
+        vscode.commands.executeCommand('sf-ui-recorder.viewResults', vscode.Uri.file(specPath));
       } else if (message.type === 'openFile') {
         const filePath = path.join(workspacePath, message.data);
         if (fs.existsSync(filePath)) {
@@ -346,7 +378,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
 }
 
 function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}) {
-  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], specFileName = '' } = bulkOptions;
+  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], specFileName = '', hasResults = false } = bulkOptions;
 
   const credentialFields = credentialParams
     .map(
@@ -403,6 +435,26 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       width: 48px;
       height: 48px;
     }
+    .header-actions {
+      margin-left: auto;
+    }
+    .history-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+      border-radius: 5px;
+      background: transparent;
+      color: var(--vscode-textLink-foreground, #3794ff);
+      font-size: 0.85em;
+      cursor: pointer;
+    }
+    .history-btn:hover {
+      background: rgba(55, 148, 255, 0.1);
+      border-color: var(--vscode-focusBorder, #3794ff);
+    }
+    .history-btn svg { flex-shrink: 0; }
     h2 {
       margin: 0;
       font-size: 1.2em;
@@ -914,6 +966,13 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
   <div class="header">
     <img src="${iconUri}" alt="SF UI Recorder" />
     <h2>Playback — <span class="file-badge" id="spec-file-link">${escapeHtml(specFileName)}</span></h2>
+    ${hasResults ? `
+    <div class="header-actions">
+      <button class="history-btn" id="history-btn" title="View playback history for this recording">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 4v4l2.5 1.5M8 1.5a6.5 6.5 0 1 0 6.5 6.5A6.5 6.5 0 0 0 8 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        View History
+      </button>
+    </div>` : ''}
   </div>
 
   <div class="section">
@@ -1494,6 +1553,11 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       const specLink = e.target.closest('#spec-file-link');
       if (specLink) {
         vscode.postMessage({ type: 'openSpecFile' });
+        return;
+      }
+      const historyBtn = e.target.closest('#history-btn');
+      if (historyBtn) {
+        vscode.postMessage({ type: 'openHistory' });
         return;
       }
       const fileLink = e.target.closest('.warning-file-link');

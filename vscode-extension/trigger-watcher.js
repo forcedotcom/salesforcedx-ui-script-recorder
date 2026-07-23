@@ -88,7 +88,7 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
   }
 
   // Ensure playwright.config.js exists in the workspace
-  const { created } = ensurePlaywrightConfig(workspaceRoot);
+  const { created } = ensurePlaywrightConfig(workspaceRoot, context.extensionPath);
   if (created) {
     outputChannel.appendLine('[MCP] Created playwright.config.js in workspace');
   }
