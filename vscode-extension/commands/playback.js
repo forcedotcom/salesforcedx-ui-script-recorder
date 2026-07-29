@@ -6,6 +6,10 @@ const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
 // Session cache for parameter values (cleared when extension reloads)
 const paramCache = new Map();
 
+// Singleton playback panel tracking
+let activePlaybackPanel = null;
+let playbackInProgress = false;
+
 // Credential-like parameter names that belong in user-files (not data-files)
 const CREDENTIAL_PARAMS = new Set(['username', 'password', 'user', 'pass', 'email', 'login']);
 
@@ -14,17 +18,27 @@ function isCredentialParam(name) {
 }
 
 // True when playback-results/ contains at least one completed run whose folder
-// matches this spec (folders are named "<specName>---..." with a results.json).
+// matches this spec (folders are named "<specName>---..." with a results.json,
+// or "<specName>---...---BULK/" with session subfolders).
 function specHasResults(workspacePath, specPath) {
   const resultsDir = path.join(workspacePath, 'playback-results');
   if (!fs.existsSync(resultsDir)) return false;
   const specName = path.basename(specPath).replace(/\.spec\.js$/, '');
   try {
-    return fs.readdirSync(resultsDir).some((entry) => {
+    const entries = fs.readdirSync(resultsDir);
+    return entries.some((entry) => {
       if (entry.split('---')[0] !== specName) return false;
       const full = path.join(resultsDir, entry);
       try {
-        return fs.statSync(full).isDirectory() && fs.existsSync(path.join(full, 'results.json'));
+        if (!fs.statSync(full).isDirectory()) return false;
+        if (fs.existsSync(path.join(full, 'results.json'))) return true;
+        // Nested BULK folder — check for session subfolders with results
+        if (entry.endsWith('---BULK')) {
+          return fs.readdirSync(full).some((sub) => {
+            return fs.existsSync(path.join(full, sub, 'results.json'));
+          });
+        }
+        return false;
       } catch {
         return false;
       }
@@ -38,6 +52,11 @@ function register(context) {
   return vscode.commands.registerCommand(
     'sf-ui-recorder.playbackScript',
     async () => {
+      if (playbackInProgress) {
+        vscode.window.showInformationMessage('SF UI Recorder: A playback is already running. Please wait for it to finish before starting another.');
+        return;
+      }
+
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
         vscode.window.showErrorMessage('SF UI Recorder: No file open.');
@@ -120,8 +139,12 @@ function register(context) {
       });
       if (!result) return;
 
+      playbackInProgress = true;
+
       const specFileName = path.basename(specPath);
+      const headless = result.headed === false;
       const playwrightArgs = ['playwright', 'test', specFileName];
+      if (!headless) playwrightArgs.push('--headed');
 
       if (result.mode === 'bulk') {
         const { parallelCount, usersFile, dataFiles } = result;
@@ -156,11 +179,17 @@ function register(context) {
         }
 
         const batchId = Date.now().toString(36);
+        const batchTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const specBaseName = path.basename(specPath).replace(/\.spec\.js$/, '');
+        const bulkFolder = `${specBaseName}---${batchTimestamp}---BULK`;
 
+        const terminals = [];
         for (let i = 0; i < count; i++) {
           const envVars = {
             SF_UI_RECORDER_BATCH_ID: batchId,
+            SF_UI_RECORDER_BATCH_TIMESTAMP: batchTimestamp,
             SF_UI_RECORDER_SESSION_INDEX: String(i + 1),
+            ...(headless && { SF_UI_RECORDER_HEADLESS: '1' }),
           };
           const userRow = userRowCount > 0 ? userRows[i % userRowCount] : {};
           for (const [key, value] of Object.entries(userRow)) {
@@ -178,7 +207,26 @@ function register(context) {
           });
           terminal.show();
           terminal.sendText(`npx ${playwrightArgs.join(' ')}`);
+          terminals.push({ terminal, sessionIndex: i + 1 });
         }
+
+        // Close terminals automatically when their results land
+        autoCloseTerminals(workspacePath, terminals.map((t) => ({
+          terminal: t.terminal,
+          resultsPath: path.join(workspacePath, 'playback-results', bulkFolder, `session-${t.sessionIndex}`, 'results.json'),
+        })), () => { playbackInProgress = false; });
+
+        // Open results viewer with in-progress state
+        vscode.commands.executeCommand('sf-ui-recorder.viewResults', {
+          specUri: vscode.Uri.file(specPath),
+          inProgress: {
+            specName: specBaseName,
+            mode: 'bulk',
+            sessions: count,
+            bulkFolder,
+            startTime: new Date().toISOString(),
+          },
+        });
       } else {
         const { params } = result;
 
@@ -189,6 +237,7 @@ function register(context) {
 
         // Build env vars from parameter values
         const envVars = {};
+        if (headless) envVars.SF_UI_RECORDER_HEADLESS = '1';
         for (const [paramName, value] of Object.entries(params)) {
           envVars[`SF_UI_RECORDER_${paramName.toUpperCase()}`] = value;
         }
@@ -200,9 +249,84 @@ function register(context) {
         });
         terminal.show();
         terminal.sendText(`npx ${playwrightArgs.join(' ')}`);
+
+        const specBaseName = path.basename(specPath).replace(/\.spec\.js$/, '');
+
+        // Snapshot existing result folders so we only detect new ones
+        const resultsDir = path.join(workspacePath, 'playback-results');
+        const existingDirs = new Set();
+        try { fs.readdirSync(resultsDir).forEach((d) => existingDirs.add(d)); } catch { /* ignore */ }
+
+        // Close terminal when results land
+        autoCloseTerminals(workspacePath, [{ terminal, specName: specBaseName, existingDirs }], () => { playbackInProgress = false; });
+
+        vscode.commands.executeCommand('sf-ui-recorder.viewResults', {
+          specUri: vscode.Uri.file(specPath),
+          inProgress: {
+            specName: specBaseName,
+            mode: 'single',
+            sessions: 1,
+            startTime: new Date().toISOString(),
+          },
+        });
       }
     }
   );
+}
+
+// Watches for results.json files and disposes the associated terminals once they appear.
+// Each entry: { terminal, resultsPath } for bulk, or { terminal, specName } for single.
+function autoCloseTerminals(workspacePath, entries, onAllDone) {
+  const resultsDir = path.join(workspacePath, 'playback-results');
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(resultsDir, '**/results.json')
+  );
+
+  const pending = new Set(entries);
+  let finished = false;
+
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    watcher.dispose();
+    closeListener.dispose();
+    if (onAllDone) onAllDone();
+  };
+
+  const checkAndClose = () => {
+    for (const entry of pending) {
+      let done = false;
+      if (entry.resultsPath) {
+        done = fs.existsSync(entry.resultsPath);
+      } else if (entry.specName) {
+        try {
+          done = fs.readdirSync(resultsDir).some((dir) => {
+            if (entry.existingDirs && entry.existingDirs.has(dir)) return false;
+            if (dir.split('---')[0] !== entry.specName) return false;
+            return fs.existsSync(path.join(resultsDir, dir, 'results.json'));
+          });
+        } catch { /* ignore */ }
+      }
+      if (done) {
+        entry.terminal.dispose();
+        pending.delete(entry);
+      }
+    }
+    if (pending.size === 0) finish();
+  };
+
+  watcher.onDidCreate(checkAndClose);
+  watcher.onDidChange(checkAndClose);
+
+  // Clean up when terminals close (manually or via dispose above)
+  const closeListener = vscode.window.onDidCloseTerminal((closed) => {
+    for (const entry of pending) {
+      if (entry.terminal === closed) {
+        pending.delete(entry);
+      }
+    }
+    if (pending.size === 0) finish();
+  });
 }
 
 function parseCsv(filePath) {
@@ -236,6 +360,12 @@ function generateSkeletonCsv(workspacePath, dirName, fileName, columns) {
 function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
   const { credentialParams = [], dataParams = [], workspacePath, usersDir, dataDir, specPath, specFileName = '' } = bulkOptions;
 
+  // Reuse existing playback panel if open
+  if (activePlaybackPanel) {
+    activePlaybackPanel.reveal(vscode.ViewColumn.Active);
+    return new Promise(() => {});
+  }
+
   return new Promise((resolve) => {
     const extensionRoot = path.resolve(__dirname, '..', '..');
     const panel = vscode.window.createWebviewPanel(
@@ -248,6 +378,8 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         localResourceRoots: [vscode.Uri.file(path.join(extensionRoot, 'images'))],
       }
     );
+
+    activePlaybackPanel = panel;
 
     const iconUri = panel.webview.asWebviewUri(
       vscode.Uri.file(path.join(extensionRoot, 'images', 'icon.png'))
@@ -370,6 +502,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
     dataWatcher.onDidDelete(onCsvChange);
 
     panel.onDidDispose(() => {
+      activePlaybackPanel = null;
       usersWatcher.dispose();
       dataWatcher.dispose();
       if (!resolved) resolve(null);
@@ -535,6 +668,58 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     }
     .section {
       padding: 0;
+    }
+    .headed-toggle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 18px;
+      margin-bottom: 4px;
+    }
+    .headed-toggle label {
+      font-size: 0.85em;
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      user-select: none;
+    }
+    .toggle-switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: var(--vscode-input-background, rgba(128,128,128,0.3));
+      border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.4));
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      left: 2px;
+      top: 2px;
+      background: var(--vscode-foreground);
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-slider {
+      background: rgba(78, 201, 99, 0.3);
+      border-color: #4ec963;
+    }
+    .toggle-switch input:checked + .toggle-slider::before {
+      transform: translateX(16px);
+      background: #4ec963;
     }
     .description {
       font-size: 0.85em;
@@ -1066,6 +1251,14 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       </div>
     </div>
 
+    <div class="headed-toggle">
+      <label class="toggle-switch">
+        <input type="checkbox" id="headed-toggle" ${activeMode === 'bulk' ? '' : 'checked'} />
+        <span class="toggle-slider"></span>
+      </label>
+      <label for="headed-toggle">Headed (show browser)</label>
+    </div>
+
     <div class="buttons">
       <button class="primary" id="run-btn" ${paramNames.length > 0 ? 'disabled' : ''}><svg width="12" height="14" viewBox="0 0 12 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 1.5L10.5 7L1.5 12.5V1.5Z" stroke="#4ec963" stroke-width="1.5" stroke-linejoin="round"/></svg> Run</button>
     </div>
@@ -1337,6 +1530,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       modeBulkBtn.classList.toggle('active', mode === 'bulk');
       singleContent.classList.toggle('active', mode === 'single');
       bulkContent.classList.toggle('active', mode === 'bulk');
+      document.getElementById('headed-toggle').checked = mode === 'single';
       vscode.postMessage({ type: 'modeChange', data: mode });
       validateForm();
     }
@@ -1402,16 +1596,17 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 
     runBtn.addEventListener('click', () => {
       if (runBtn.disabled) return;
+      const headed = document.getElementById('headed-toggle').checked;
       if (mode === 'single') {
         const params = {};
         paramNames.forEach((name) => {
           params[name] = document.getElementById('param-' + name).value;
         });
-        vscode.postMessage({ type: 'run', data: { params } });
+        vscode.postMessage({ type: 'run', data: { params, headed } });
       } else {
         const parallelCount = document.getElementById('parallel-count').value;
         const usersFile = selectedUserFile;
-        vscode.postMessage({ type: 'run', data: { mode: 'bulk', parallelCount: parseInt(parallelCount, 10), usersFile, dataFiles: dataSelected } });
+        vscode.postMessage({ type: 'run', data: { mode: 'bulk', parallelCount: parseInt(parallelCount, 10), usersFile, dataFiles: dataSelected, headed } });
       }
     });
 

@@ -185,10 +185,15 @@ class RecordingCodeLensProvider {
         if (entry.split('---')[0] !== specName) return false;
         const full = path.join(resultsDir, entry);
         try {
-          return (
-            fs.statSync(full).isDirectory() &&
-            fs.existsSync(path.join(full, 'results.json'))
-          );
+          if (!fs.statSync(full).isDirectory()) return false;
+          if (fs.existsSync(path.join(full, 'results.json'))) return true;
+          // Nested BULK folder — check for session subfolders with results
+          if (entry.endsWith('---BULK')) {
+            return fs.readdirSync(full).some((sub) => {
+              return fs.existsSync(path.join(full, sub, 'results.json'));
+            });
+          }
+          return false;
         } catch {
           return false;
         }

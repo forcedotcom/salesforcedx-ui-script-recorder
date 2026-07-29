@@ -51,6 +51,7 @@ class RecorderReporter {
   onEnd(result) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
     const batchId = process.env.SF_UI_RECORDER_BATCH_ID || null
+    const batchTimestamp = process.env.SF_UI_RECORDER_BATCH_TIMESTAMP || null
     const sessionIndex = process.env.SF_UI_RECORDER_SESSION_INDEX || null
 
     const specFiles = [...new Set(this.results.map((r) => r.file))]
@@ -58,17 +59,25 @@ class RecorderReporter {
       ? specFiles[0].replace(/\.spec\.js$/, '')
       : specFiles.map((f) => f.replace(/\.spec\.js$/, '')).join('+')
 
-    const dirName = batchId
-      ? `${specName}---batch-${batchId}---session-${sessionIndex}`
-      : `${specName}---${timestamp}`
-    const runDir = path.resolve('playback-results', dirName)
+    const bulkFolder = batchId ? `${specName}---${batchTimestamp || timestamp}---BULK` : null
+
+    let runDir
+    let dirName
+    if (batchId) {
+      const sessionFolder = `session-${sessionIndex}`
+      dirName = `${bulkFolder}/${sessionFolder}`
+      runDir = path.resolve('playback-results', bulkFolder, sessionFolder)
+    } else {
+      dirName = `${specName}---${timestamp}`
+      runDir = path.resolve('playback-results', dirName)
+    }
     fs.mkdirSync(runDir, { recursive: true })
 
     const summary = {
       timestamp: this.startTime,
       duration: result.duration,
       status: result.status,
-      ...(batchId && { batchId, sessionIndex: parseInt(sessionIndex, 10) }),
+      ...(batchId && { batchId, bulkFolder, sessionIndex: parseInt(sessionIndex, 10) }),
       total: this.results.length,
       passed: this.results.filter((r) => r.status === 'passed').length,
       failed: this.results.filter((r) => r.status === 'failed').length,
