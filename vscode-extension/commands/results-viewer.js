@@ -2,11 +2,15 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 
+// Singleton panel state
+let activePanel = null;
+let panelState = null;
+
 function register(context) {
-  return vscode.commands.registerCommand(
+  const cmd = vscode.commands.registerCommand(
     'sf-ui-recorder.viewResults',
-    // Optional arg: a spec name (string) or a spec file Uri to focus the panel
-    // on a single recording's results. Omitted -> show all runs.
+    // Optional arg: a spec name (string), a spec file Uri, or an options object
+    // { specUri, inProgress } to open the panel with an active run.
     async (arg) => {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
@@ -16,29 +20,37 @@ function register(context) {
 
       const workspacePath = workspaceFolder.uri.fsPath;
       const resultsDir = path.join(workspacePath, 'playback-results');
+      fs.mkdirSync(resultsDir, { recursive: true });
 
-      if (!fs.existsSync(resultsDir)) {
-        vscode.window.showInformationMessage('SF UI Recorder: No playback results found. Run a playback first.');
-        return;
+      // Handle options object from playback command
+      let inProgress = null;
+      let specArg = arg;
+      if (arg && typeof arg === 'object' && arg.inProgress) {
+        inProgress = arg.inProgress;
+        specArg = arg.specUri || null;
       }
 
       const allRuns = loadAllRuns(resultsDir);
-      if (allRuns.length === 0) {
-        vscode.window.showInformationMessage('SF UI Recorder: No playback results found. Run a playback first.');
-        return;
-      }
 
-      // A spec arg (from the CodeLens / spec-file button) pre-selects that
-      // recording in the filter dropdown, but only if it actually has runs.
-      const specName = specNameFromArg(arg);
+      const specName = specNameFromArg(specArg);
       let initialSpec = null;
       if (specName && allRuns.some((r) => runSpecName(r) === specName)) {
         initialSpec = specName;
       }
 
-      showResultsPanel(context, resultsDir, initialSpec);
+      // Reuse existing panel if open
+      if (activePanel && panelState) {
+        activePanel.reveal(vscode.ViewColumn.Active);
+        if (initialSpec !== null) panelState.setSpec(initialSpec);
+        if (inProgress) panelState.addInProgress(inProgress);
+        panelState.refresh();
+        return;
+      }
+
+      showResultsPanel(context, resultsDir, initialSpec, inProgress);
     }
   );
+  return cmd;
 }
 
 // Distinct recording (spec) names across all runs, sorted for a stable dropdown.
@@ -60,41 +72,58 @@ function specNameFromArg(arg) {
   return null;
 }
 
-// A run folder is named "<specName>---<timestamp>" or
-// "<specName>---batch-<id>---session-<n>"; the spec name is the first segment.
+// A run folder is named "<specName>---<timestamp>" (single),
+// or bulk runs live under "<specName>---<timestamp>---BULK/session-<n>".
+// Legacy flat naming "<specName>---batch-<id>---session-<n>" is also supported.
 function runSpecName(run) {
   return (run._dirName || '').split('---')[0];
 }
 
 function loadAllRuns(resultsDir) {
-  return fs
-    .readdirSync(resultsDir)
-    .filter((entry) => {
-      const full = path.join(resultsDir, entry);
-      return fs.statSync(full).isDirectory() && fs.existsSync(path.join(full, 'results.json'));
-    })
-    .sort()
-    .map((dirName) => {
-      const data = JSON.parse(fs.readFileSync(path.join(resultsDir, dirName, 'results.json'), 'utf-8'));
-      data._dirName = dirName;
-      return data;
-    });
+  const runs = [];
+
+  for (const entry of fs.readdirSync(resultsDir)) {
+    const full = path.join(resultsDir, entry);
+    if (!fs.statSync(full).isDirectory()) continue;
+
+    if (entry.endsWith('---BULK')) {
+      // Nested bulk folder — each subfolder is a session
+      for (const sub of fs.readdirSync(full)) {
+        const subFull = path.join(full, sub);
+        if (!fs.statSync(subFull).isDirectory()) continue;
+        if (!fs.existsSync(path.join(subFull, 'results.json'))) continue;
+        const data = JSON.parse(fs.readFileSync(path.join(subFull, 'results.json'), 'utf-8'));
+        data._dirName = `${entry}/${sub}`;
+        data._bulkParent = entry;
+        runs.push(data);
+      }
+    } else if (fs.existsSync(path.join(full, 'results.json'))) {
+      // Single run or legacy flat bulk session
+      const data = JSON.parse(fs.readFileSync(path.join(full, 'results.json'), 'utf-8'));
+      data._dirName = entry;
+      runs.push(data);
+    }
+  }
+
+  runs.sort((a, b) => (a._dirName || '').localeCompare(b._dirName || ''));
+  return runs;
 }
 
 function groupRuns(runs) {
   const groups = [];
-  const batchMap = new Map();
+  const bulkMap = new Map();
 
   for (const run of runs) {
-    if (run.batchId) {
-      if (!batchMap.has(run.batchId)) {
-        const group = { batchId: run.batchId, runs: [] };
-        batchMap.set(run.batchId, group);
+    const groupKey = run._bulkParent || run.bulkFolder || (run.batchId ? `batch-${run.batchId}` : null);
+    if (groupKey) {
+      if (!bulkMap.has(groupKey)) {
+        const group = { batchId: run.batchId || groupKey, bulkFolder: run._bulkParent || run.bulkFolder || null, runs: [] };
+        bulkMap.set(groupKey, group);
         groups.push(group);
       }
-      batchMap.get(run.batchId).runs.push(run);
+      bulkMap.get(groupKey).runs.push(run);
     } else {
-      groups.push({ batchId: null, runs: [run] });
+      groups.push({ batchId: null, bulkFolder: null, runs: [run] });
     }
   }
 
@@ -107,7 +136,7 @@ function groupRuns(runs) {
   return groups;
 }
 
-function showResultsPanel(context, resultsDir, initialSpec) {
+function showResultsPanel(context, resultsDir, initialSpec, inProgress = null) {
   const extensionRoot = path.resolve(__dirname, '..', '..');
   const panel = vscode.window.createWebviewPanel(
     'sfUiRecorderResults',
@@ -127,36 +156,76 @@ function showResultsPanel(context, resultsDir, initialSpec) {
     vscode.Uri.file(path.join(extensionRoot, 'images', 'icon.png'))
   );
 
-  // Base webview URI for the results directory, so run screenshots (stored as
-  // "<run>/<file>.png") can be resolved to displayable webview URIs in-page.
   const resultsBaseUri = panel.webview.asWebviewUri(vscode.Uri.file(resultsDir)).toString();
 
-  // Re-reads runs, applies the active recording filter, and repaints the panel.
-  // Reloading on each render keeps the dropdown and results fresh if new runs
-  // land while the panel is open. `activeSpec` of null means "all recordings".
+  let activeInProgress = inProgress ? [inProgress] : [];
   let activeSpec = initialSpec || null;
+
   const renderPanel = () => {
     const runs = loadAllRuns(resultsDir);
     const specNames = listSpecNames(runs);
-    // If the active filter no longer has any runs, fall back to showing all.
     if (activeSpec && !specNames.includes(activeSpec)) activeSpec = null;
     const filtered = activeSpec ? runs.filter((r) => runSpecName(r) === activeSpec) : runs;
     const groups = groupRuns(filtered);
+
+    // Remove in-progress entries whose results have landed
+    activeInProgress = activeInProgress.filter((ip) => {
+      if (ip.mode === 'bulk' && ip.bulkFolder) {
+        const bulkDir = path.join(resultsDir, ip.bulkFolder);
+        if (!fs.existsSync(bulkDir)) return true;
+        const completed = fs.readdirSync(bulkDir).filter((sub) =>
+          fs.existsSync(path.join(bulkDir, sub, 'results.json'))
+        ).length;
+        return completed < ip.sessions;
+      }
+      const hasNewResult = runs.some((r) => {
+        return runSpecName(r) === ip.specName && new Date(r.timestamp) >= new Date(ip.startTime);
+      });
+      return !hasNewResult;
+    });
+
     panel.webview.html = getResultsHtml(
       groups,
       iconUri,
       resultsBaseUri,
       panel.webview.cspSource,
       specNames,
-      activeSpec
+      activeSpec,
+      activeInProgress
     );
   };
 
   renderPanel();
 
+  // Watch for new results to auto-refresh
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(resultsDir, '**/results.json')
+  );
+  const refresh = () => renderPanel();
+  watcher.onDidCreate(refresh);
+  watcher.onDidChange(refresh);
+
+  // Register as singleton
+  activePanel = panel;
+  panelState = {
+    refresh: renderPanel,
+    setSpec(spec) { activeSpec = spec; },
+    addInProgress(ip) {
+      const isDupe = activeInProgress.some((existing) =>
+        existing.specName === ip.specName && existing.startTime === ip.startTime
+      );
+      if (!isDupe) activeInProgress.push(ip);
+    },
+  };
+
+  panel.onDidDispose(() => {
+    watcher.dispose();
+    activePanel = null;
+    panelState = null;
+  });
+
   panel.webview.onDidReceiveMessage((message) => {
     if (message.type === 'filterSpec') {
-      // Empty string from the "All recordings" option -> clear the filter.
       activeSpec = message.data ? message.data : null;
       renderPanel();
       return;
@@ -186,7 +255,7 @@ function showResultsPanel(context, resultsDir, initialSpec) {
   });
 }
 
-function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = [], activeSpec = null) {
+function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = [], activeSpec = null, inProgress = []) {
   const reversedGroups = [...groups].reverse();
 
   // Recording filter dropdown: "All recordings" plus one option per spec.
@@ -203,18 +272,37 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
       <select id="spec-filter" class="filter-select">${options}</select>
     </div>`;
 
-  // Latest tab: the most recent group, auto-expanded.
-  const latestGroup = reversedGroups[0];
-  const latestHtml = latestGroup
-    ? (latestGroup.batchId ? renderBatchGroup(latestGroup, resultsBaseUri, true) : renderSingleRun(latestGroup.runs[0], resultsBaseUri, true))
-    : '<div class="empty-state">No playback results yet.</div>';
+  // In-progress section
+  const inProgressHtml = inProgress.length > 0 ? inProgress.map((ip) => {
+    const label = ip.mode === 'bulk'
+      ? `${escapeHtml(ip.specName)} — ${ip.sessions} session${ip.sessions > 1 ? 's' : ''}`
+      : escapeHtml(ip.specName);
+    const modeLabel = ip.mode === 'bulk' ? 'Bulk' : 'Single';
+    const modeBadgeClass = ip.mode === 'bulk' ? 'bulk-badge' : 'single-badge';
+    return `
+      <div class="run-card in-progress-card">
+        <div class="run-header in-progress-header">
+          <span class="spinner"></span>
+          <span class="${modeBadgeClass}">${modeLabel}</span>
+          <span class="run-title">${label}</span>
+          <span class="run-meta">Running...</span>
+        </div>
+      </div>`;
+  }).join('') : '';
 
-  // History tab: every group, collapsed and expandable.
-  const historyHtml = reversedGroups.map((group) => {
+  const inProgressSection = inProgress.length > 0 ? `
+    <div class="in-progress-section">
+      <div class="in-progress-label">In Progress</div>
+      ${inProgressHtml}
+    </div>` : '';
+
+  // All runs, most recent first. The latest is auto-expanded (only if nothing in progress).
+  const historyHtml = reversedGroups.map((group, idx) => {
+    const startOpen = idx === 0 && inProgress.length === 0;
     if (group.batchId) {
-      return renderBatchGroup(group, resultsBaseUri, false);
+      return renderBatchGroup(group, resultsBaseUri, startOpen);
     }
-    return renderSingleRun(group.runs[0], resultsBaseUri, false);
+    return renderSingleRun(group.runs[0], resultsBaseUri, startOpen);
   }).join('');
 
   const totalRuns = groups.length;
@@ -272,6 +360,38 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
     .filter-select:focus {
       outline: 1px solid var(--vscode-focusBorder);
       outline-offset: -1px;
+    }
+    .in-progress-section {
+      margin-bottom: 20px;
+    }
+    .in-progress-label {
+      font-size: 0.8em;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--vscode-textLink-foreground, #3794ff);
+      margin-bottom: 8px;
+    }
+    .in-progress-card {
+      border-color: var(--vscode-textLink-foreground, rgba(55, 148, 255, 0.4));
+    }
+    .in-progress-header {
+      cursor: default;
+    }
+    .in-progress-header:hover {
+      background: rgba(128,128,128,0.04);
+    }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(55, 148, 255, 0.2);
+      border-top-color: var(--vscode-textLink-foreground, #3794ff);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
     .trend-bar {
       display: flex;
@@ -389,11 +509,15 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
     .session-row.expandable { cursor: pointer; }
     .session-row.expandable:hover { background: rgba(128,128,128,0.06); }
     .session-caret {
-      display: inline-block;
-      width: 12px;
-      font-size: 0.8em;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      font-size: 1em;
       color: var(--vscode-descriptionForeground);
       transition: transform 0.15s ease;
+      transform-origin: center;
     }
     .session-row.open .session-caret { transform: rotate(90deg); }
     .session-detail { display: none; }
@@ -487,32 +611,6 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
     .stack-content { display: none; }
     .stack-content.open { display: block; }
 
-    /* Tabs */
-    .tabs {
-      display: flex;
-      gap: 4px;
-      border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
-      margin-bottom: 18px;
-    }
-    .tab {
-      padding: 8px 16px;
-      cursor: pointer;
-      border: none;
-      background: none;
-      color: var(--vscode-descriptionForeground);
-      font-family: inherit;
-      font-size: 0.95em;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
-    }
-    .tab:hover { color: var(--vscode-foreground); }
-    .tab.active {
-      color: var(--vscode-foreground);
-      border-bottom-color: var(--vscode-textLink-foreground, #3794ff);
-      font-weight: 600;
-    }
-    .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
 
     /* Pass/fail rate bar (bulk runs) */
     .rate {
@@ -595,25 +693,16 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
 
   ${filterHtml}
 
-  <div class="tabs">
-    <button class="tab active" data-tab="latest">Latest</button>
-    <button class="tab" data-tab="history">History${totalRuns > 0 ? ` (${totalRuns})` : ''}</button>
-  </div>
+  ${inProgressSection}
 
-  <div class="tab-panel active" data-panel="latest">
-    ${latestHtml}
+  ${totalRuns > 1 ? `
+  <div class="trend-bar">
+    <span class="trend-label">Trend</span>
+    ${trendDots}
+    <span class="trend-summary">${passedRuns}/${totalRuns} passed (${Math.round((passedRuns / totalRuns) * 100)}%)</span>
   </div>
-
-  <div class="tab-panel" data-panel="history">
-    ${totalRuns > 1 ? `
-    <div class="trend-bar">
-      <span class="trend-label">Trend</span>
-      ${trendDots}
-      <span class="trend-summary">${passedRuns}/${totalRuns} passed (${Math.round((passedRuns / totalRuns) * 100)}%)</span>
-    </div>
-    ` : ''}
-    ${historyHtml || '<div class="empty-state">No playback results yet.</div>'}
-  </div>
+  ` : ''}
+  ${historyHtml || (inProgress.length === 0 ? '<div class="empty-state">No playback results yet.</div>' : '')}
 
   <div class="lightbox" id="lightbox"><img id="lightbox-img" src="" alt="Screenshot" /></div>
 
@@ -627,17 +716,6 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
         vscode.postMessage({ type: 'filterSpec', data: specFilter.value });
       });
     }
-
-    // Tab switching
-    document.querySelectorAll('.tab').forEach((tab) => {
-      tab.addEventListener('click', () => {
-        const name = tab.dataset.tab;
-        document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-        document.querySelectorAll('.tab-panel').forEach((p) => {
-          p.classList.toggle('active', p.dataset.panel === name);
-        });
-      });
-    });
 
     // Expand/collapse run cards (ignore clicks on interactive children)
     document.querySelectorAll('.run-header').forEach((header) => {
@@ -701,7 +779,7 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
 }
 
 function renderBatchGroup(group, resultsBaseUri, startOpen) {
-  const { batchId, runs } = group;
+  const { batchId, bulkFolder, runs } = group;
   const totalSessions = runs.length;
   const passedSessions = runs.filter((r) => r.status === 'passed').length;
   const failedSessions = totalSessions - passedSessions;
@@ -710,6 +788,7 @@ function renderBatchGroup(group, resultsBaseUri, startOpen) {
   const date = formatDate(runs[0].timestamp);
   const duration = formatDuration(Math.max(...runs.map((r) => r.duration)));
   const specName = runs[0]._dirName.split('---')[0];
+  const folderDir = bulkFolder || runs[0]._bulkParent || runs[0]._dirName;
 
   const sessionsHtml = runs.map((run) => {
     const icon = run.status === 'passed' ? '&#10003;' : '&#10007;';
@@ -760,6 +839,7 @@ function renderBatchGroup(group, resultsBaseUri, startOpen) {
         <span class="rate-label">${passedSessions}/${totalSessions} passed &middot; ${passRate}% pass rate</span>
       </div>
       ${sessionsHtml}
+      <span class="folder-link" data-dir="${escapeHtml(folderDir)}">&#128193; Open results folder</span>
     </div>
   </div>`;
 }

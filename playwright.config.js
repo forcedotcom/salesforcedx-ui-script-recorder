@@ -3,6 +3,7 @@ import fs from 'fs'
 
 const authStatePath = './auth-state.json'
 const hasAuthState = fs.existsSync(authStatePath)
+const headless = process.env.SF_UI_RECORDER_HEADLESS === '1'
 
 export default defineConfig({
   testDir: '.',
@@ -13,7 +14,7 @@ export default defineConfig({
     ['./.sf-ui-recorder/reporter.js'],
   ],
   use: {
-    headless: false,
+    headless,
     viewport: { width: 1280, height: 720 },
     actionTimeout: 120000,
     screenshot: 'only-on-failure',

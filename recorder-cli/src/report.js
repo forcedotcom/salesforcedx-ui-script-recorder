@@ -45,41 +45,57 @@ export function generateReport(options = {}) {
 }
 
 function getRunDirs() {
-  return fs
-    .readdirSync(RESULTS_DIR)
-    .filter((entry) => {
-      const full = path.join(RESULTS_DIR, entry)
-      return fs.statSync(full).isDirectory() && fs.existsSync(path.join(full, 'results.json'))
-    })
-    .sort()
+  const dirs = []
+
+  for (const entry of fs.readdirSync(RESULTS_DIR)) {
+    const full = path.join(RESULTS_DIR, entry)
+    if (!fs.statSync(full).isDirectory()) continue
+
+    if (entry.endsWith('---BULK')) {
+      for (const sub of fs.readdirSync(full)) {
+        const subFull = path.join(full, sub)
+        if (!fs.statSync(subFull).isDirectory()) continue
+        if (!fs.existsSync(path.join(subFull, 'results.json'))) continue
+        dirs.push({ dirName: `${entry}/${sub}`, bulkParent: entry })
+      }
+    } else if (fs.existsSync(path.join(full, 'results.json'))) {
+      dirs.push({ dirName: entry, bulkParent: null })
+    }
+  }
+
+  dirs.sort((a, b) => a.dirName.localeCompare(b.dirName))
+  return dirs
 }
 
-function loadRun(dirName) {
+function loadRun(entry) {
+  const dirName = typeof entry === 'string' ? entry : entry.dirName
+  const bulkParent = typeof entry === 'string' ? null : entry.bulkParent
   const resultsPath = path.join(RESULTS_DIR, dirName, 'results.json')
   if (!fs.existsSync(resultsPath)) return null
   const data = JSON.parse(fs.readFileSync(resultsPath, 'utf-8'))
   data._dirName = dirName
+  if (bulkParent) data._bulkParent = bulkParent
   return data
 }
 
 function groupRuns(runs) {
   const groups = []
-  const batchMap = new Map()
+  const bulkMap = new Map()
 
   for (const run of runs) {
-    if (run.batchId) {
-      if (!batchMap.has(run.batchId)) {
-        const group = { batchId: run.batchId, runs: [] }
-        batchMap.set(run.batchId, group)
+    const groupKey = run._bulkParent || run.bulkFolder || (run.batchId ? `batch-${run.batchId}` : null)
+    if (groupKey) {
+      if (!bulkMap.has(groupKey)) {
+        const group = { batchId: run.batchId || groupKey, bulkFolder: run._bulkParent || run.bulkFolder || null, runs: [] }
+        bulkMap.set(groupKey, group)
         groups.push(group)
       }
-      batchMap.get(run.batchId).runs.push(run)
+      bulkMap.get(groupKey).runs.push(run)
     } else {
-      groups.push({ batchId: null, runs: [run] })
+      groups.push({ batchId: null, bulkFolder: null, runs: [run] })
     }
   }
 
-  // Sort sessions within each batch
   for (const group of groups) {
     if (group.batchId) {
       group.runs.sort((a, b) => (a.sessionIndex || 0) - (b.sessionIndex || 0))
@@ -90,7 +106,7 @@ function groupRuns(runs) {
 }
 
 function printBatch(group) {
-  const { batchId, runs } = group
+  const { bulkFolder, runs } = group
   const totalSessions = runs.length
   const passedSessions = runs.filter((r) => r.status === 'passed').length
   const failedSessions = totalSessions - passedSessions
@@ -100,7 +116,8 @@ function printBatch(group) {
 
   const statusIcon = overallStatus === 'passed' ? chalk.green('PASS') : chalk.red('FAIL')
   console.log(`${statusIcon}  ${chalk.cyan('BULK')}  ${chalk.dim(date)}  ${chalk.dim(`(${formatDuration(totalDuration)})`)}`)
-  console.log(chalk.dim(`     batch: ${batchId}  •  ${totalSessions} sessions`))
+  const folderLabel = bulkFolder || runs[0]._bulkParent || runs[0]._dirName
+  console.log(chalk.dim(`     ${path.join('playback-results', folderLabel)}/  •  ${totalSessions} sessions`))
   console.log('')
 
   console.log(
