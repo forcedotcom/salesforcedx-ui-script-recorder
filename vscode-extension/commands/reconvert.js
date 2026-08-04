@@ -24,6 +24,16 @@ function register(context) {
         return;
       }
 
+      const specPath = jsonPath.replace(/\.json$/, '.spec.js');
+      if (fs.existsSync(specPath)) {
+        const confirm = await vscode.window.showWarningMessage(
+          `This will regenerate the Playwright script and overwrite any manual changes you've made to ${path.basename(specPath)}.`,
+          { modal: true },
+          'Re-convert'
+        );
+        if (confirm !== 'Re-convert') return;
+      }
+
       const cliRoot = path.resolve(__dirname, '..', '..');
       const cliPath = path.resolve(cliRoot, 'recorder-cli', 'bin', 'cli.js');
 

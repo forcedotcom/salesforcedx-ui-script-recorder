@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+  <!-- Salesforce cloud -->
+  <g transform="translate(-3.5, 3), scale(1.1)">
+    <path
+      d="M18.15 11.23C18 8 15.34 5.39 12.06 5.39c-2.45 0-4.57 1.46-5.5 3.56A4.542 4.542 0 003.5 13.33c0 2.5 2.04 4.54 4.54 4.54h9.83c2.27 0 4.13-1.85 4.13-4.13 0-2.1-1.57-3.83-3.85-4.11z"
+      fill="currentColor"
+    />
+  </g>
+  <!-- Record icon (filled dot with ring) in top right -->
+  <circle cx="18.5" cy="6" r="5" stroke="currentColor" stroke-width="1"/>
+  <circle cx="18.5" cy="6" r="3" fill="currentColor"/>
+</svg>

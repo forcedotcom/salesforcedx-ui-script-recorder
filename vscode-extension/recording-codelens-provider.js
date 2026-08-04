@@ -33,55 +33,14 @@ class RecordingCodeLensProvider {
       return [];
     }
 
-    const lenses = [];
-
-    // Top-level reconvert lens
-    lenses.push(
+    // Only show the reconvert lens on JSON files
+    return [
       new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
         title: '$(refresh) Re-convert to Playwright',
         command: 'sf-ui-recorder.reconvert',
         arguments: [document.uri],
       })
-    );
-
-    // Find each step's position in the document
-    const stepPositions = findStepPositions(text, recording.steps);
-
-    for (let i = 0; i < recording.steps.length; i++) {
-      const step = recording.steps[i];
-      const line = stepPositions[i];
-      if (line === -1) continue;
-
-      const isParameterizable =
-        step.type === 'change' ||
-        (step.type === 'click' && step.parentSelectors?.length > 0);
-
-      if (!isParameterizable) continue;
-
-      const range = new vscode.Range(line, 0, line, 0);
-      const paramStatus = getParamStatusLabel(step);
-
-      if (paramStatus) {
-        lenses.push(
-          new vscode.CodeLens(range, {
-            title: `$(symbol-parameter) ${paramStatus}`,
-            command: 'sf-ui-recorder.parameterizeStep',
-            arguments: [document.uri, i],
-          })
-        );
-      } else {
-        const label = getStepLabel(step);
-        lenses.push(
-          new vscode.CodeLens(range, {
-            title: `$(add) Parameterize "${label}"`,
-            command: 'sf-ui-recorder.parameterizeStep',
-            arguments: [document.uri, i],
-          })
-        );
-      }
-    }
-
-    return lenses;
+    ];
   }
 
   _provideSpecLenses(document) {
