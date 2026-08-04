@@ -77,19 +77,9 @@ export class Overlay {
       if (e.altKey && e.keyCode === 75) {
         this._toggleVisibility()
       }
-      // Shift held — switch to assert mode
-      if (e.key === 'Shift') {
-        if (this._selectorBox) this._selectorBox.classList.add('sf-assert-mode')
-        this._setAssertMode(true)
-      }
     }
 
-    this._keyUpHandler = (e) => {
-      if (e.key === 'Shift') {
-        if (this._selectorBox) this._selectorBox.classList.remove('sf-assert-mode')
-        this._setAssertMode(false)
-      }
-    }
+    this._keyUpHandler = () => {}
 
     this._assertFlashInterval = setInterval(() => {
       if (this._state.hasAsserted) {
@@ -219,30 +209,23 @@ export class Overlay {
     this._buildPauseIcon(pauseBtn, false)
     nav.appendChild(pauseBtn)
 
+    // Assert button (hidden for now)
+    const assertBtn = document.createElement('span')
+    assertBtn.className = 'fr-assert-btn'
+    assertBtn.setAttribute('data-action', 'assert')
+    assertBtn.title = 'Assert next click'
+    assertBtn.textContent = 'Assert'
+    assertBtn.style.display = 'none'
+    nav.appendChild(assertBtn)
+
     // Current selector display
     const selectorDisplay = document.createElement('span')
     selectorDisplay.className = 'fr-current-selector'
     nav.appendChild(selectorDisplay)
 
-    // Assert mode indicator (hidden by default, shown when Shift held)
-    const assertIndicator = document.createElement('span')
-    assertIndicator.className = 'fr-assert-indicator'
-    assertIndicator.textContent = 'ASSERT'
-    nav.appendChild(assertIndicator)
-
-    // Shortcut hints (stacked vertically)
+    // Shortcut hint
     const shortcuts = document.createElement('span')
     shortcuts.className = 'fr-shortcuts'
-
-    const shortcutAssert = document.createElement('span')
-    shortcutAssert.className = 'fr-shortcut fr-shortcut-assert'
-    const shiftKbd = document.createElement('kbd')
-    shiftKbd.textContent = 'shift'
-    shortcutAssert.appendChild(shiftKbd)
-    shortcutAssert.appendChild(document.createTextNode(' + '))
-    shortcutAssert.appendChild(this._buildClickIcon())
-    shortcutAssert.appendChild(document.createTextNode(' to assert'))
-
     const shortcutHide = document.createElement('span')
     shortcutHide.className = 'fr-shortcut'
     const altKbd = document.createElement('kbd')
@@ -253,8 +236,6 @@ export class Overlay {
     shortcutHide.appendChild(document.createTextNode(' + '))
     shortcutHide.appendChild(kKbd)
     shortcutHide.appendChild(document.createTextNode(' to hide'))
-
-    shortcuts.appendChild(shortcutAssert)
     shortcuts.appendChild(shortcutHide)
     nav.appendChild(shortcuts)
 
@@ -328,6 +309,7 @@ export class Overlay {
 
     const stopBtn = this._overlayEl.querySelector('[data-action="stop"]')
     const pauseBtn = this._overlayEl.querySelector('[data-action="pause"]')
+    const assertBtn = this._overlayEl.querySelector('[data-action="assert"]')
     const closeBtn = this._overlayEl.querySelector('[data-action="close"]')
 
     if (stopBtn) {
@@ -353,6 +335,14 @@ export class Overlay {
           pauseBtn.title = 'Resume'
         }
         this._updateRecIndicator()
+      })
+    }
+
+    if (assertBtn) {
+      assertBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this._state.assertNextClick = !this._state.assertNextClick
+        this._updateAssertButton()
       })
     }
 
@@ -454,6 +444,8 @@ export class Overlay {
     nav.classList.add('fr-assert-flash')
     setTimeout(() => nav.classList.remove('fr-assert-flash'), 350)
 
+    this._updateAssertButton()
+
     const selectorEl = this._overlayEl?.querySelector('.fr-current-selector')
     if (selectorEl) {
       const prev = selectorEl.textContent
@@ -466,77 +458,16 @@ export class Overlay {
     }
   }
 
-  _buildClickIcon() {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('class', 'fr-click-icon')
-    svg.setAttribute('width', '16')
-    svg.setAttribute('height', '16')
-    svg.setAttribute('viewBox', '0 0 24 24')
-    svg.setAttribute('fill', '#fff')
-    svg.setAttribute('stroke', '#fff')
-    svg.setAttribute('stroke-width', '1.6')
-    svg.setAttribute('stroke-linecap', 'round')
-    svg.setAttribute('stroke-linejoin', 'round')
-
-    // Arrow cursor (filled), tip at (8, 8), pointing down-right.
-    const cursor = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-    cursor.setAttribute('d',
-      'M8 8 L8 19 L11 16 L13.5 21 L15.5 20 L13 15 L17 14 Z'
-    )
-    svg.appendChild(cursor)
-
-    // Motion lines — six short rays of equal length, evenly fanned around
-    // the cursor's upper region. All ~1.75 units long for visual consistency.
-    const motionAttrs = [
-      { x1: 4,    y1: 8,    x2: 2.25, y2: 8    }, // straight left
-      { x1: 4.75, y1: 4.75, x2: 3.5,  y2: 3.5  }, // diagonal upper-left
-      { x1: 8,    y1: 4,    x2: 8,    y2: 2.25 }, // straight up
-      { x1: 11.25, y1: 4.75, x2: 12.5, y2: 3.5  }, // diagonal upper-right
-      { x1: 12,   y1: 8,    x2: 13.75, y2: 8    }, // straight right
-      { x1: 4.75, y1: 11.25, x2: 3.5,  y2: 12.5 }  // diagonal lower-left
-    ]
-    motionAttrs.forEach(({ x1, y1, x2, y2 }) => {
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line')
-      line.setAttribute('x1', String(x1))
-      line.setAttribute('y1', String(y1))
-      line.setAttribute('x2', String(x2))
-      line.setAttribute('y2', String(y2))
-      line.setAttribute('stroke', '#fff')
-      line.setAttribute('stroke-width', '2')
-      line.setAttribute('stroke-linecap', 'round')
-      line.setAttribute('fill', 'none')
-      svg.appendChild(line)
-    })
-
-    return svg
-  }
-
-  _setAssertMode(active) {
-    if (!this._overlayEl) return
-    const indicator = this._overlayEl.querySelector('.fr-assert-indicator')
-    if (indicator) {
-      indicator.style.display = active ? 'inline-flex' : 'none'
-    }
-    const shortcut = this._overlayEl.querySelector('.fr-shortcut-assert')
-    if (shortcut) {
-      while (shortcut.firstChild) shortcut.removeChild(shortcut.firstChild)
-      if (active) {
-        shortcut.appendChild(this._buildClickIcon())
-        shortcut.appendChild(document.createTextNode(' to assert element'))
-      } else {
-        const shiftKbd = document.createElement('kbd')
-        shiftKbd.textContent = 'shift'
-        shortcut.appendChild(shiftKbd)
-        shortcut.appendChild(document.createTextNode(' + '))
-        shortcut.appendChild(this._buildClickIcon())
-        shortcut.appendChild(document.createTextNode(' to assert'))
-      }
-    }
-    const hideShortcut = this._overlayEl.querySelector('.fr-shortcuts .fr-shortcut:not(.fr-shortcut-assert)')
-    if (hideShortcut) {
-      hideShortcut.style.display = active ? 'none' : ''
+  _updateAssertButton() {
+    const btn = this._overlayEl?.querySelector('[data-action="assert"]')
+    if (!btn) return
+    const active = this._state.assertNextClick
+    btn.classList.toggle('fr-assert-btn-active', active)
+    if (this._selectorBox) {
+      this._selectorBox.classList.toggle('sf-assert-mode', active)
     }
   }
+
 
   _injectSelectorStyles() {
     const style = document.createElement('style')
@@ -667,6 +598,30 @@ export class Overlay {
         margin-right: 4px;
       }
 
+      #${OVERLAY_ID} .fr-assert-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #4ade80;
+        border: 1px solid #4ade80;
+        transition: background 0.15s, color 0.15s;
+        white-space: nowrap;
+      }
+
+      #${OVERLAY_ID} .fr-assert-btn:hover {
+        background: rgba(74, 222, 128, 0.15);
+      }
+
+      #${OVERLAY_ID} .fr-assert-btn.fr-assert-btn-active {
+        background: #4ade80;
+        color: #032d60;
+      }
+
       #${OVERLAY_ID} .fr-current-selector {
         flex: 1;
         font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
@@ -677,19 +632,6 @@ export class Overlay {
         white-space: nowrap;
       }
 
-      #${OVERLAY_ID} .fr-assert-indicator {
-        display: none;
-        align-items: center;
-        gap: 4px;
-        font-size: 10px;
-        font-weight: 700;
-        color: #4ade80;
-        text-transform: uppercase;
-        padding: 2px 6px;
-        border: 1px solid #4ade80;
-        border-radius: 3px;
-        white-space: nowrap;
-      }
 
       #${OVERLAY_ID} .fr-current-selector.fr-assert-confirmed {
         color: #4ade80 !important;
@@ -726,12 +668,6 @@ export class Overlay {
         line-height: 1.2;
       }
 
-      #${OVERLAY_ID} .fr-click-icon {
-        flex-shrink: 0;
-        vertical-align: middle;
-        margin: 0 1px;
-        color: #fff;
-      }
 
       #${OVERLAY_ID} .fr-close-btn {
         display: flex;

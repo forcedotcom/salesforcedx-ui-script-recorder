@@ -85,16 +85,23 @@ export class Recorder {
     // Only record user-initiated actions
     if (!e.isTrusted) return
 
-    // Shift+Click captures an assertion instead of a normal action
-    if ((e.type === 'click' || e.type === 'dblclick') && e.shiftKey) {
+    // Assert mode: next click captures an assertion, then resets
+    if ((e.type === 'click' || e.type === 'dblclick') && this._state.assertNextClick) {
       e.preventDefault()
       e.stopPropagation()
 
       const selectors = getSelector(e, { dataAttribute: this._state.dataAttribute })
-      if (!selectors) return
+      if (!selectors) return // stay armed — element wasn't selectable
+
+      this._state.assertNextClick = false
 
       const target = e.target
-      const rawText = target.innerText?.trim() || ''
+      const directText = Array.from(target.childNodes)
+        .filter(n => n.nodeType === 3)
+        .map(n => n.textContent.trim())
+        .join(' ')
+        .trim()
+      const rawText = directText || (target.innerText?.split('\n')[0]?.trim() || '')
       const textContent = rawText.length > 0 && rawText.length <= 200 ? rawText : ''
 
       this._sendMessage({

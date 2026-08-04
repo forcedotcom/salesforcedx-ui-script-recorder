@@ -24,6 +24,7 @@ import { Controller } from './controller.js'
     screenshotClippedMode: false,
     hasRecorded: false,
     hasAsserted: false,
+    assertNextClick: false,
     dataAttribute,
     recording: []
   }
