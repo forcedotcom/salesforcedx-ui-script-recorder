@@ -15,7 +15,7 @@ import { stripVerificationSteps } from './stripVerificationSteps.js'
  */
 export async function convertToPlaywright(data) {
   // Strip Salesforce identity verification steps — they are not needed on
-  // playback when the sfdc_lv2 device cookie is present via auth-state.json
+  // playback when the sfdc_lv2 device cookie is present via auth-states/
   const cleanedData = stripVerificationSteps(data)
 
   const script = []
@@ -26,36 +26,45 @@ export async function convertToPlaywright(data) {
   const scriptStart = `test('${cleanedData.title}', async ({ page }) => {`
   script.push(scriptStart)
 
+  script.push(`// --- Test setup ---`)
+
   const testNoTimeOut = `test.setTimeout(0);`
   script.push(testNoTimeOut)
 
   const testGlobalTimeout = `page.setDefaultTimeout(${cleanedData.timeout || timeoutDuration});`
   script.push(testGlobalTimeout)
 
+  script.push(`// --- Recorded steps ---`)
+
   const scriptActions = getScriptBody(cleanedData)
   script.push(scriptActions)
+
+  script.push(`// --- End of recorded steps ---`)
 
   const scriptEnd = `});`
   script.push(scriptEnd)
 
+  script.push(`// --- Auth state persistence (do not edit) ---`)
+
   // After each test, persist Salesforce device-identity cookies (especially sfdc_lv2)
-  // to auth-state.json. On subsequent runs, Playwright injects these cookies via
-  // storageState so that Salesforce recognises the browser as a trusted device and
-  // skips the MFA verification prompt — enabling unattended playback.
+  // to auth-states/<hostname>---<username>.json. On subsequent runs, Playwright injects
+  // these cookies via storageState so that Salesforce recognises the browser as a trusted
+  // device and skips the MFA verification prompt — enabling unattended playback.
   const afterEachHook = `
-// Persist Salesforce device-identity cookies (especially sfdc_lv2) to auth-state.json.
-// On subsequent runs, Playwright injects these cookies via storageState so that
-// Salesforce recognises the browser as a trusted device and skips the MFA verification
-// prompt — enabling unattended playback. Do not remove this block.
-test.afterEach(async ({ context }) => {
+test.afterEach(async ({ page, context }) => {
   const fs = await import('fs');
+  const path = await import('path');
   const DEVICE_COOKIE_NAMES = ['sfdc_lv2', 'BrowserId', 'BrowserId_sec', 'CookieConsentPolicy', 'LSKey-c\$CookieConsentPolicy'];
   try {
     const cookies = await context.cookies();
     const deviceCookies = cookies.filter((c) => DEVICE_COOKIE_NAMES.includes(c.name));
     if (deviceCookies.some((c) => c.name === 'sfdc_lv2')) {
       const deviceState = { cookies: deviceCookies, origins: [] };
-      fs.writeFileSync('./auth-state.json', JSON.stringify(deviceState, null, 2));
+      const hostname = new URL(page.url()).hostname;
+      const username = (process.env.SF_UI_RECORDER_USERNAME || process.env.SF_UI_RECORDER_EMAIL || 'default').replace(/[\\/\\\\:*?"<>|]/g, '_');
+      const authDir = './auth-states';
+      fs.mkdirSync(authDir, { recursive: true });
+      fs.writeFileSync(path.join(authDir, \`\${hostname}---\${username}.json\`), JSON.stringify(deviceState, null, 2));
     }
   } catch (e) {
     // Browser may already be closed — non-fatal
