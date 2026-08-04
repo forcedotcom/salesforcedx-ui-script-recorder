@@ -216,6 +216,10 @@ function showResultsPanel(context, resultsDir, initialSpec, inProgress = null) {
       );
       if (!isDupe) activeInProgress.push(ip);
     },
+    clearInProgress() {
+      activeInProgress = [];
+      renderPanel();
+    },
   };
 
   panel.onDidDispose(() => {
@@ -231,10 +235,7 @@ function showResultsPanel(context, resultsDir, initialSpec, inProgress = null) {
       return;
     }
     if (message.type === 'openFolder') {
-      const folderPath = path.join(resultsDir, message.data);
-      if (fs.existsSync(folderPath)) {
-        vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(folderPath));
-      }
+      vscode.commands.executeCommand('sf-ui-recorder.revealResultFolder', message.data);
     } else if (message.type === 'openFile') {
       const filePath = path.join(resultsDir, message.data);
       if (fs.existsSync(filePath)) {
@@ -251,6 +252,8 @@ function showResultsPanel(context, resultsDir, initialSpec, inProgress = null) {
       } else {
         vscode.window.showWarningMessage(`SF UI Recorder: Screenshot not found: ${message.data}`);
       }
+    } else if (message.type === 'downloadHtml') {
+      exportResultsHtml(resultsDir, activeSpec);
     }
   });
 }
@@ -334,7 +337,25 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
       margin-bottom: 20px;
     }
     .header img { width: 48px; height: 48px; }
-    h2 { margin: 0; font-size: 1.2em; font-weight: 600; }
+    h2 { margin: 0; font-size: 1.2em; font-weight: 600; flex: 1; }
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+      border-radius: 5px;
+      background: transparent;
+      color: var(--vscode-foreground);
+      font-size: 0.85em;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .download-btn:hover {
+      background: var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+      border-color: var(--vscode-focusBorder, #3794ff);
+    }
+    .download-btn svg { flex-shrink: 0; }
     .filter-row {
       display: flex;
       align-items: center;
@@ -689,6 +710,10 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
   <div class="header">
     <img src="${iconUri}" alt="SF UI Recorder" />
     <h2>Playback Results</h2>
+    <button class="download-btn" id="download-btn" title="Download results as HTML report">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3"/><path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>
+      Export HTML
+    </button>
   </div>
 
   ${filterHtml}
@@ -773,6 +798,10 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
         lightbox.classList.add('open');
       }
     });
+
+    document.getElementById('download-btn').addEventListener('click', () => {
+      vscode.postMessage({ type: 'downloadHtml' });
+    });
   </script>
 </body>
 </html>`;
@@ -839,7 +868,7 @@ function renderBatchGroup(group, resultsBaseUri, startOpen) {
         <span class="rate-label">${passedSessions}/${totalSessions} passed &middot; ${passRate}% pass rate</span>
       </div>
       ${sessionsHtml}
-      <span class="folder-link" data-dir="${escapeHtml(folderDir)}">&#128193; Open results folder</span>
+      <span class="folder-link" data-dir="${escapeHtml(folderDir)}">&#128196; View result files</span>
     </div>
   </div>`;
 }
@@ -880,7 +909,7 @@ function renderSingleRun(run, resultsBaseUri, startOpen) {
         <span class="count-total">(${run.total} total)</span>
       </div>
       ${testsHtml}
-      <span class="folder-link" data-dir="${escapeHtml(run._dirName)}">&#128193; Open results folder</span>
+      <span class="folder-link" data-dir="${escapeHtml(run._dirName)}">&#128196; View result files</span>
     </div>
   </div>`;
 }
@@ -1055,4 +1084,221 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-module.exports = { register };
+async function exportResultsHtml(resultsDir, activeSpec) {
+  const runs = loadAllRuns(resultsDir);
+  const filtered = activeSpec ? runs.filter((r) => runSpecName(r) === activeSpec) : runs;
+  const groups = groupRuns(filtered);
+  const reversedGroups = [...groups].reverse();
+
+  const totalRuns = groups.length;
+  const passedRuns = groups.filter((g) => g.runs.every((r) => r.status === 'passed')).length;
+
+  const trendDots = groups.map((g) => {
+    const passed = g.runs.every((r) => r.status === 'passed');
+    return `<span class="dot ${passed ? 'pass' : 'fail'}"></span>`;
+  }).join('');
+
+  const historyHtml = reversedGroups.map((group) => {
+    if (group.batchId) {
+      return renderExportBatchGroup(group, resultsDir);
+    }
+    return renderExportSingleRun(group.runs[0], resultsDir);
+  }).join('');
+
+  const title = activeSpec ? `Playback Results — ${escapeHtml(activeSpec)}` : 'Playback Results';
+  const now = new Date().toLocaleString();
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; color: #ccc; background: #1e1e1e; padding: 20px; margin: 0; }
+    .header { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+    h2 { margin: 0; font-size: 1.2em; font-weight: 600; color: #fff; }
+    .export-meta { font-size: 0.8em; color: #888; margin-bottom: 16px; }
+    .trend-bar { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; padding: 8px 12px; background: rgba(128,128,128,0.08); border-radius: 4px; }
+    .trend-label { font-size: 0.8em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-right: 8px; }
+    .trend-summary { margin-left: 8px; font-size: 0.85em; color: #aaa; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+    .dot.pass { background: #4ec963; }
+    .dot.fail { background: #f44747; }
+    .run-card { border: 1px solid rgba(128,128,128,0.2); border-radius: 6px; margin-bottom: 10px; overflow: hidden; }
+    .run-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: rgba(128,128,128,0.05); cursor: default; }
+    .run-title { font-weight: 500; flex: 1; }
+    .run-meta { font-size: 0.85em; color: #888; }
+    .status-icon { font-weight: bold; }
+    .status-icon.pass { color: #4ec963; }
+    .status-icon.fail { color: #f44747; }
+    .status-icon.timeout { color: #cca700; }
+    .run-details { padding: 12px 14px; border-top: 1px solid rgba(128,128,128,0.15); }
+    .single-badge, .bulk-badge { font-size: 0.75em; font-weight: 600; text-transform: uppercase; padding: 2px 6px; border-radius: 3px; }
+    .single-badge { background: rgba(55, 148, 255, 0.15); color: #3794ff; }
+    .bulk-badge { background: rgba(188, 63, 188, 0.15); color: #d670d6; }
+    .error-block { background: rgba(244, 71, 71, 0.06); border: 1px solid rgba(244, 71, 71, 0.2); border-radius: 4px; padding: 10px; margin-bottom: 8px; }
+    .error-message { white-space: pre-wrap; word-break: break-word; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.9em; line-height: 1.5; }
+    .error-stack { white-space: pre-wrap; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8em; color: #888; margin-top: 8px; }
+    .code-frame { white-space: pre-wrap; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8em; color: #aaa; margin-top: 8px; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 3px; }
+    .shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .shot img { max-width: 200px; max-height: 150px; border-radius: 4px; border: 1px solid rgba(128,128,128,0.3); }
+    .shot-caption { font-size: 0.75em; color: #888; margin-top: 2px; text-align: center; }
+    .session-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid rgba(128,128,128,0.1); }
+    .session-icon { font-weight: bold; }
+    .session-icon.pass { color: #4ec963; }
+    .session-icon.fail { color: #f44747; }
+    .session-icon.timeout { color: #cca700; }
+    .session-label { flex: 1; }
+    .session-duration { font-size: 0.85em; color: #888; }
+    .stdout-block { white-space: pre-wrap; font-family: monospace; font-size: 0.8em; color: #aaa; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 3px; margin-top: 8px; }
+    .pass-rate { font-size: 0.85em; color: #888; margin-left: 8px; }
+    .folder-link { display: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2>${title}</h2>
+  </div>
+  <div class="export-meta">Exported ${escapeHtml(now)}</div>
+
+  ${totalRuns > 1 ? `
+  <div class="trend-bar">
+    <span class="trend-label">Trend</span>
+    ${trendDots}
+    <span class="trend-summary">${passedRuns}/${totalRuns} passed (${Math.round((passedRuns / totalRuns) * 100)}%)</span>
+  </div>` : ''}
+
+  ${historyHtml || '<p>No playback results.</p>'}
+</body>
+</html>`;
+
+  const defaultName = activeSpec ? `${activeSpec}-results.html` : 'playback-results.html';
+  const uri = await vscode.window.showSaveDialog({
+    defaultUri: vscode.Uri.file(path.join(path.dirname(resultsDir), defaultName)),
+    filters: { 'HTML': ['html'] },
+  });
+
+  if (uri) {
+    fs.writeFileSync(uri.fsPath, html, 'utf-8');
+    vscode.window.showInformationMessage(`SF UI Recorder: Report saved to ${path.basename(uri.fsPath)}`);
+  }
+}
+
+function renderExportBatchGroup(group, resultsDir) {
+  const { runs } = group;
+  const totalSessions = runs.length;
+  const passedSessions = runs.filter((r) => r.status === 'passed').length;
+  const overallStatus = passedSessions === totalSessions ? 'pass' : 'fail';
+  const date = formatDate(runs[0].timestamp);
+  const duration = formatDuration(Math.max(...runs.map((r) => r.duration)));
+  const specName = runs[0]._dirName.split('---')[0];
+
+  const sessionsHtml = runs.map((run) => {
+    const icon = run.status === 'passed' ? '&#10003;' : '&#10007;';
+    const iconClass = run.status === 'passed' ? 'pass' : (run.status === 'timedOut' ? 'timeout' : 'fail');
+    const errorsHtml = renderExportErrors(run);
+    const shotsHtml = renderExportScreenshots(run, resultsDir);
+    const stdoutHtml = renderStdout(run);
+
+    return `
+      <div class="session-row">
+        <span class="session-icon ${iconClass}">${icon}</span>
+        <span class="session-label">Session ${run.sessionIndex || '?'}</span>
+        <span class="session-duration">${formatDuration(run.duration)}</span>
+      </div>
+      ${errorsHtml}${shotsHtml}${stdoutHtml}`;
+  }).join('');
+
+  return `
+    <div class="run-card">
+      <div class="run-header">
+        <span class="status-icon ${overallStatus}">&#${overallStatus === 'pass' ? '10003' : '10007'};</span>
+        <span class="bulk-badge">Bulk</span>
+        <span class="run-title">${escapeHtml(specName)}</span>
+        <span class="pass-rate">${passedSessions}/${totalSessions} passed</span>
+        <span class="run-meta">${escapeHtml(date)} &middot; ${duration}</span>
+      </div>
+      <div class="run-details">${sessionsHtml}</div>
+    </div>`;
+}
+
+function renderExportSingleRun(run, resultsDir) {
+  const specName = run._dirName.split('---')[0];
+  const icon = run.status === 'passed' ? '&#10003;' : '&#10007;';
+  const iconClass = run.status === 'passed' ? 'pass' : (run.status === 'timedOut' ? 'timeout' : 'fail');
+  const date = formatDate(run.timestamp);
+  const duration = formatDuration(run.duration);
+  const errorsHtml = renderExportErrors(run);
+  const shotsHtml = renderExportScreenshots(run, resultsDir);
+  const stdoutHtml = renderStdout(run);
+  const detailHtml = `${errorsHtml}${shotsHtml}${stdoutHtml}`;
+
+  return `
+    <div class="run-card">
+      <div class="run-header">
+        <span class="status-icon ${iconClass}">${icon}</span>
+        <span class="single-badge">Single</span>
+        <span class="run-title">${escapeHtml(specName)}</span>
+        <span class="run-meta">${escapeHtml(date)} &middot; ${duration}</span>
+      </div>
+      ${detailHtml ? `<div class="run-details">${detailHtml}</div>` : ''}
+    </div>`;
+}
+
+function renderExportErrors(run) {
+  const failures = run.tests.filter((t) => t.status !== 'passed');
+  if (failures.length === 0) return '';
+
+  return failures.map((test) => {
+    if (!test.errors || test.errors.length === 0) return '';
+    return test.errors.map((err) => {
+      const message = err.message || 'Unknown error';
+      const hasStack = err.stack && err.stack.trim().length > 0;
+      const hasSnippet = err.snippet && err.snippet.trim().length > 0;
+      return `
+        <div class="error-block">
+          <div class="error-message">${escapeHtml(stripAnsi(message))}</div>
+          ${hasStack ? `<pre class="error-stack">${escapeHtml(stripAnsi(err.stack))}</pre>` : ''}
+          ${hasSnippet ? `<pre class="code-frame">${escapeHtml(stripAnsi(err.snippet))}</pre>` : ''}
+        </div>`;
+    }).join('');
+  }).join('');
+}
+
+function renderExportScreenshots(run, resultsDir) {
+  if (!run.tests) return '';
+  const images = [];
+  for (const test of run.tests) {
+    if (!test.attachments) continue;
+    for (const att of test.attachments) {
+      if (!att.path) continue;
+      if (!(att.contentType && att.contentType.startsWith('image/')) && !/\.(png|jpe?g|webp|gif)$/i.test(att.path)) continue;
+      if (path.isAbsolute(att.path) || att.path.includes('..')) continue;
+      const fullPath = path.join(resultsDir, run._dirName, att.path);
+      if (!fs.existsSync(fullPath)) continue;
+      const data = fs.readFileSync(fullPath).toString('base64');
+      const mime = att.contentType || 'image/png';
+      const caption = att.name || path.basename(att.path);
+      images.push(`
+        <div class="shot">
+          <img src="data:${mime};base64,${data}" alt="${escapeHtml(caption)}" />
+          <div class="shot-caption">${escapeHtml(caption)}</div>
+        </div>`);
+    }
+  }
+  if (images.length === 0) return '';
+  return `<div class="shots">${images.join('')}</div>`;
+}
+
+function stripAnsi(str) {
+  if (!str) return '';
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+function clearInProgress() {
+  if (panelState) panelState.clearInProgress();
+}
+
+module.exports = { register, clearInProgress };

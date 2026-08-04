@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
+const { clearInProgress } = require('./results-viewer');
 
 // Session cache for parameter values (cleared when extension reloads)
 const paramCache = new Map();
@@ -9,6 +10,7 @@ const paramCache = new Map();
 // Singleton playback panel tracking
 let activePlaybackPanel = null;
 let playbackInProgress = false;
+let previousTaskExecutions = [];
 
 // Credential-like parameter names that belong in user-files (not data-files)
 const CREDENTIAL_PARAMS = new Set(['username', 'password', 'user', 'pass', 'email', 'login']);
@@ -139,9 +141,18 @@ function register(context) {
       });
       if (!result) return;
 
+      // Use the spec path from the form (may have changed via recording dropdown)
+      const activeSpecPath = result.specPath || specPath;
+
       playbackInProgress = true;
 
-      const specFileName = path.basename(specPath);
+      // Close terminals from previous playback runs
+      for (const prev of previousTaskExecutions) {
+        prev.terminate();
+      }
+      previousTaskExecutions = [];
+
+      const specFileName = path.basename(activeSpecPath);
       const headless = result.headed === false;
       const playwrightArgs = ['playwright', 'test', specFileName];
       if (!headless) playwrightArgs.push('--headed');
@@ -162,7 +173,7 @@ function register(context) {
           });
         }
 
-        // Spawn parallel terminals with cycling
+        // Spawn parallel tasks with cycling
         const count = parallelCount;
         const userRowCount = userRows.length;
         const dataRowCount = dataRows.length;
@@ -180,10 +191,10 @@ function register(context) {
 
         const batchId = Date.now().toString(36);
         const batchTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const specBaseName = path.basename(specPath).replace(/\.spec\.js$/, '');
+        const specBaseName = path.basename(activeSpecPath).replace(/\.spec\.js$/, '');
         const bulkFolder = `${specBaseName}---${batchTimestamp}---BULK`;
 
-        const terminals = [];
+        let pendingCount = count;
         for (let i = 0; i < count; i++) {
           const envVars = {
             SF_UI_RECORDER_BATCH_ID: batchId,
@@ -200,25 +211,23 @@ function register(context) {
             envVars[`SF_UI_RECORDER_${key.toUpperCase()}`] = value;
           }
 
-          const terminal = vscode.window.createTerminal({
-            name: `SF UI Recorder: Bulk #${i + 1}`,
-            cwd: workspacePath,
-            env: envVars,
-          });
-          terminal.show();
-          terminal.sendText(`npx ${playwrightArgs.join(' ')}`);
-          terminals.push({ terminal, sessionIndex: i + 1 });
-        }
+          // Resolve auth state for this session's username
+          const sessionUsername = userRow.username || userRow.email || userRow.user;
+          const sessionAuthState = resolveAuthState(workspacePath, activeSpecPath, sessionUsername);
+          if (sessionAuthState) envVars.SF_UI_RECORDER_AUTH_STATE = sessionAuthState;
 
-        // Close terminals automatically when their results land
-        autoCloseTerminals(workspacePath, terminals.map((t) => ({
-          terminal: t.terminal,
-          resultsPath: path.join(workspacePath, 'playback-results', bulkFolder, `session-${t.sessionIndex}`, 'results.json'),
-        })), () => { playbackInProgress = false; });
+          runPlaybackTask(`Bulk #${i + 1}`, workspacePath, playwrightArgs, envVars, () => {
+            pendingCount--;
+            if (pendingCount === 0) {
+              playbackInProgress = false;
+              clearInProgress();
+            }
+          });
+        }
 
         // Open results viewer with in-progress state
         vscode.commands.executeCommand('sf-ui-recorder.viewResults', {
-          specUri: vscode.Uri.file(specPath),
+          specUri: vscode.Uri.file(activeSpecPath),
           inProgress: {
             specName: specBaseName,
             mode: 'bulk',
@@ -242,26 +251,20 @@ function register(context) {
           envVars[`SF_UI_RECORDER_${paramName.toUpperCase()}`] = value;
         }
 
-        const terminal = vscode.window.createTerminal({
-          name: 'SF UI Recorder: Playback',
-          cwd: workspacePath,
-          env: envVars,
+        // Resolve auth state for this spec + username
+        const username = params.username || params.email || params.user;
+        const authStatePath = resolveAuthState(workspacePath, activeSpecPath, username);
+        if (authStatePath) envVars.SF_UI_RECORDER_AUTH_STATE = authStatePath;
+
+        const specBaseName = path.basename(activeSpecPath).replace(/\.spec\.js$/, '');
+
+        runPlaybackTask('Playback', workspacePath, playwrightArgs, envVars, () => {
+          playbackInProgress = false;
+          clearInProgress();
         });
-        terminal.show();
-        terminal.sendText(`npx ${playwrightArgs.join(' ')}`);
-
-        const specBaseName = path.basename(specPath).replace(/\.spec\.js$/, '');
-
-        // Snapshot existing result folders so we only detect new ones
-        const resultsDir = path.join(workspacePath, 'playback-results');
-        const existingDirs = new Set();
-        try { fs.readdirSync(resultsDir).forEach((d) => existingDirs.add(d)); } catch { /* ignore */ }
-
-        // Close terminal when results land
-        autoCloseTerminals(workspacePath, [{ terminal, specName: specBaseName, existingDirs }], () => { playbackInProgress = false; });
 
         vscode.commands.executeCommand('sf-ui-recorder.viewResults', {
-          specUri: vscode.Uri.file(specPath),
+          specUri: vscode.Uri.file(activeSpecPath),
           inProgress: {
             specName: specBaseName,
             mode: 'single',
@@ -274,58 +277,70 @@ function register(context) {
   );
 }
 
-// Watches for results.json files and disposes the associated terminals once they appear.
-// Each entry: { terminal, resultsPath } for bulk, or { terminal, specName } for single.
-function autoCloseTerminals(workspacePath, entries, onAllDone) {
-  const resultsDir = path.join(workspacePath, 'playback-results');
-  const watcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(resultsDir, '**/results.json')
+// Resolve the auth-state file for a spec given a username.
+// Auth states are stored as: auth-states/<hostname>---<username>.json
+function resolveAuthState(workspacePath, specPath, username) {
+  if (!username) return null;
+  const authDir = path.join(workspacePath, 'auth-states');
+  if (!fs.existsSync(authDir)) return null;
+
+  const specContent = fs.readFileSync(specPath, 'utf-8');
+  const gotoMatch = specContent.match(/page\.goto\(\s*['"`]([^'"`]+)['"`]/);
+  if (!gotoMatch) return null;
+
+  let hostname;
+  try {
+    hostname = new URL(gotoMatch[1]).hostname;
+  } catch {
+    return null;
+  }
+
+  const sanitizedUsername = username.replace(/[/\\:*?"<>|]/g, '_');
+  const fileName = `${hostname}---${sanitizedUsername}.json`;
+  const filePath = path.join(authDir, fileName);
+  if (fs.existsSync(filePath)) return filePath;
+
+  // Fallback: check for any auth state matching just the hostname
+  try {
+    const entries = fs.readdirSync(authDir);
+    const match = entries.find((f) => f.startsWith(hostname + '---') && f.endsWith('.json'));
+    if (match) return path.join(authDir, match);
+  } catch {}
+
+  return null;
+}
+
+// Runs a playback command as a VS Code Task, which gives us proper process exit detection.
+// The onDone callback fires as soon as the process exits (success or failure).
+function runPlaybackTask(label, cwd, playwrightArgs, envVars, onDone) {
+  const execution = new vscode.ShellExecution(`npx ${playwrightArgs.join(' ')}`, {
+    cwd,
+    env: envVars,
+  });
+
+  const task = new vscode.Task(
+    { type: 'sf-ui-recorder', task: label },
+    vscode.TaskScope.Workspace,
+    `SF UI Recorder: ${label}`,
+    'sf-ui-recorder',
+    execution,
+    []
   );
-
-  const pending = new Set(entries);
-  let finished = false;
-
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    watcher.dispose();
-    closeListener.dispose();
-    if (onAllDone) onAllDone();
+  task.presentationOptions = {
+    reveal: vscode.TaskRevealKind.Always,
+    panel: vscode.TaskPanelKind.New,
+    close: false,
   };
 
-  const checkAndClose = () => {
-    for (const entry of pending) {
-      let done = false;
-      if (entry.resultsPath) {
-        done = fs.existsSync(entry.resultsPath);
-      } else if (entry.specName) {
-        try {
-          done = fs.readdirSync(resultsDir).some((dir) => {
-            if (entry.existingDirs && entry.existingDirs.has(dir)) return false;
-            if (dir.split('---')[0] !== entry.specName) return false;
-            return fs.existsSync(path.join(resultsDir, dir, 'results.json'));
-          });
-        } catch { /* ignore */ }
+  vscode.tasks.executeTask(task).then((taskExecution) => {
+    previousTaskExecutions.push(taskExecution);
+    const listener = vscode.tasks.onDidEndTaskProcess((e) => {
+      if (e.execution === taskExecution) {
+        listener.dispose();
+        previousTaskExecutions = previousTaskExecutions.filter((t) => t !== taskExecution);
+        if (onDone) onDone();
       }
-      if (done) {
-        entry.terminal.dispose();
-        pending.delete(entry);
-      }
-    }
-    if (pending.size === 0) finish();
-  };
-
-  watcher.onDidCreate(checkAndClose);
-  watcher.onDidChange(checkAndClose);
-
-  // Clean up when terminals close (manually or via dispose above)
-  const closeListener = vscode.window.onDidCloseTerminal((closed) => {
-    for (const entry of pending) {
-      if (entry.terminal === closed) {
-        pending.delete(entry);
-      }
-    }
-    if (pending.size === 0) finish();
+    });
   });
 }
 
@@ -358,12 +373,29 @@ function generateSkeletonCsv(workspacePath, dirName, fileName, columns) {
 }
 
 function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
-  const { credentialParams = [], dataParams = [], workspacePath, usersDir, dataDir, specPath, specFileName = '' } = bulkOptions;
+  const { credentialParams = [], dataParams = [], workspacePath, usersDir, dataDir, specFileName = '' } = bulkOptions;
+  let specPath = bulkOptions.specPath;
 
-  // Reuse existing playback panel if open
-  if (activePlaybackPanel) {
+  // Gather list of available recordings for the dropdown
+  const recordingsDir = path.join(workspacePath, 'test-plans', 'playwright');
+  let availableRecordings = [];
+  if (fs.existsSync(recordingsDir)) {
+    availableRecordings = fs.readdirSync(recordingsDir)
+      .filter((f) => f.endsWith('.spec.js'))
+      .map((f) => f.replace(/\.spec\.js$/, ''))
+      .sort();
+  }
+
+  // If panel is already open for this same spec, just reveal it
+  if (activePlaybackPanel && activePlaybackPanel._specPath === specPath) {
     activePlaybackPanel.reveal(vscode.ViewColumn.Active);
     return new Promise(() => {});
+  }
+
+  // Dispose existing panel if it's for a different spec
+  if (activePlaybackPanel) {
+    activePlaybackPanel.dispose();
+    activePlaybackPanel = null;
   }
 
   return new Promise((resolve) => {
@@ -380,6 +412,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
     );
 
     activePlaybackPanel = panel;
+    panel._specPath = specPath;
 
     const iconUri = panel.webview.asWebviewUri(
       vscode.Uri.file(path.join(extensionRoot, 'images', 'icon.png'))
@@ -419,6 +452,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         activeMode,
         selectedUserFile,
         selectedDataFiles,
+        availableRecordings,
       });
     }
 
@@ -430,11 +464,75 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
       if (message.type === 'run') {
         resolved = true;
         panel.dispose();
-        resolve(message.data);
+        resolve({ ...message.data, specPath });
       } else if (message.type === 'cancel') {
         resolved = true;
         panel.dispose();
         resolve(null);
+      } else if (message.type === 'switchRecording') {
+        const newBaseName = message.data;
+        const newSpecPath = path.join(workspacePath, 'test-plans', 'playwright', newBaseName + '.spec.js');
+        if (fs.existsSync(newSpecPath)) {
+          // Rebuild context for new spec in-place
+          const newSpecContent = fs.readFileSync(newSpecPath, 'utf-8');
+          const newParamMatches = [...newSpecContent.matchAll(/config\.get\(['"]([^'"]+)['"]\)/g)];
+          const newParamNames = [...new Set(newParamMatches.map((m) => m[1]))];
+          const newCredentialParams = newParamNames.filter((n) => isCredentialParam(n));
+          const newDataParams = newParamNames.filter((n) => !isCredentialParam(n));
+          const newSpecFileName = newBaseName + '.spec.js';
+
+          // Update closure state
+          specPath = newSpecPath;
+          bulkOptions.specPath = newSpecPath;
+          bulkOptions.specFileName = newSpecFileName;
+          bulkOptions.credentialParams = newCredentialParams;
+          bulkOptions.dataParams = newDataParams;
+          paramNames.length = 0;
+          paramNames.push(...newParamNames);
+          panel._specPath = newSpecPath;
+          activeMode = 'single';
+          selectedUserFile = null;
+          selectedDataFiles = [];
+
+          // Re-render
+          const freshUserCsvFiles = fs.existsSync(usersDir)
+            ? fs.readdirSync(usersDir).filter((f) => f.endsWith('.csv'))
+            : [];
+          const freshDataCsvFiles = fs.existsSync(dataDir)
+            ? fs.readdirSync(dataDir).filter((f) => f.endsWith('.csv'))
+            : [];
+          const freshUserCsvMeta = {};
+          for (const f of freshUserCsvFiles) {
+            const lines = fs.readFileSync(path.join(usersDir, f), 'utf-8').split('\n').filter((l) => l.trim());
+            freshUserCsvMeta[f] = { rows: Math.max(0, lines.length - 1) };
+          }
+          const freshDataCsvMeta = {};
+          for (const f of freshDataCsvFiles) {
+            const lines = fs.readFileSync(path.join(dataDir, f), 'utf-8').split('\n').filter((l) => l.trim());
+            const headers = lines.length > 0 ? lines[0].split(',').map((h) => h.trim()) : [];
+            freshDataCsvMeta[f] = { columns: headers, rows: Math.max(0, lines.length - 1) };
+          }
+          panel.webview.html = getWebviewHtml(newParamNames, {}, iconUri, {
+            credentialParams: newCredentialParams,
+            dataParams: newDataParams,
+            workspacePath,
+            usersDir,
+            dataDir,
+            specPath: newSpecPath,
+            specFileName: newSpecFileName,
+            userCsvFiles: freshUserCsvFiles,
+            dataCsvFiles: freshDataCsvFiles,
+            userCsvMeta: freshUserCsvMeta,
+            dataCsvMeta: freshDataCsvMeta,
+            usersFileExists: freshUserCsvFiles.length > 0,
+            dataFileExists: freshDataCsvFiles.length > 0,
+            hasResults: specHasResults(workspacePath, newSpecPath),
+            activeMode,
+            selectedUserFile,
+            selectedDataFiles,
+            availableRecordings,
+          });
+        }
       } else if (message.type === 'openSpecFile') {
         if (specPath && fs.existsSync(specPath)) {
           vscode.workspace.openTextDocument(specPath).then((doc) => {
@@ -452,13 +550,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
           });
         }
       } else if (message.type === 'revealFolder') {
-        const folderPath = path.join(workspacePath, message.data);
-        if (fs.existsSync(folderPath)) {
-          vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(folderPath));
-        } else {
-          fs.mkdirSync(folderPath, { recursive: true });
-          vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(folderPath));
-        }
+        vscode.commands.executeCommand('sf-ui-recorder.revealFileSection', message.data);
       } else if (message.type === 'modeChange') {
         activeMode = message.data;
       } else if (message.type === 'dataSelectionChange') {
@@ -467,7 +559,8 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         selectedUserFile = message.data;
       } else if (message.type === 'generateUsersFile') {
         const filename = message.data?.filename || 'users.csv';
-        generateSkeletonCsv(workspacePath, 'user-files', filename, credentialParams.length > 0 ? credentialParams : ['username', 'password']);
+        const currentCredParams = bulkOptions.credentialParams || credentialParams;
+        generateSkeletonCsv(workspacePath, 'user-files', filename, currentCredParams.length > 0 ? currentCredParams : ['username', 'password']);
         vscode.window.showInformationMessage(`SF UI Recorder: Created user-files/${filename}`);
         vscode.workspace.openTextDocument(path.join(usersDir, filename)).then((doc) => {
           vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
@@ -475,7 +568,8 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         selectedUserFile = filename;
         refreshPanel();
       } else if (message.type === 'generateDataFile') {
-        const columns = message.data?.columns?.length > 0 ? message.data.columns : (dataParams.length > 0 ? dataParams : ['param1', 'param2']);
+        const currentDataParams = bulkOptions.dataParams || dataParams;
+        const columns = message.data?.columns?.length > 0 ? message.data.columns : (currentDataParams.length > 0 ? currentDataParams : ['param1', 'param2']);
         const filename = message.data?.filename || 'data.csv';
         generateSkeletonCsv(workspacePath, 'data-files', filename, columns);
         vscode.window.showInformationMessage(`SF UI Recorder: Created data-files/${filename}`);
@@ -511,7 +605,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
 }
 
 function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}) {
-  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], specFileName = '', hasResults = false } = bulkOptions;
+  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], specFileName = '', hasResults = false, availableRecordings = [] } = bulkOptions;
 
   const credentialFields = credentialParams
     .map(
@@ -1134,6 +1228,25 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     .warning-file-link:hover::after {
       opacity: 1;
     }
+    .recording-select {
+      font-size: 0.85em;
+      font-weight: 500;
+      padding: 3px 8px;
+      border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+      border-radius: 4px;
+      background: var(--vscode-input-background, transparent);
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      max-width: 300px;
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    .recording-select:hover {
+      border-color: var(--vscode-focusBorder, #3794ff);
+    }
+    .recording-select:focus {
+      outline: 1px solid var(--vscode-focusBorder);
+      border-color: var(--vscode-focusBorder);
+    }
     .custom-parameters-heading {
       font-size: 0.8em;
       font-weight: 600;
@@ -1150,7 +1263,11 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 <body>
   <div class="header">
     <img src="${iconUri}" alt="SF UI Recorder" />
-    <h2>Playback — <span class="file-badge" id="spec-file-link">${escapeHtml(specFileName)}</span></h2>
+    <h2>Playback —
+      <select id="recording-select" class="recording-select">
+        ${availableRecordings.map((r) => `<option value="${escapeHtml(r)}"${r === specFileName.replace(/\.spec\.js$/, '') ? ' selected' : ''}>${escapeHtml(r)}</option>`).join('')}
+      </select>
+    </h2>
     ${hasResults ? `
     <div class="header-actions">
       <button class="history-btn" id="history-btn" title="View playback history for this recording">
@@ -1744,12 +1861,11 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       });
     }
 
+    document.getElementById('recording-select').addEventListener('change', (e) => {
+      vscode.postMessage({ type: 'switchRecording', data: e.target.value });
+    });
+
     document.addEventListener('click', (e) => {
-      const specLink = e.target.closest('#spec-file-link');
-      if (specLink) {
-        vscode.postMessage({ type: 'openSpecFile' });
-        return;
-      }
       const historyBtn = e.target.closest('#history-btn');
       if (historyBtn) {
         vscode.postMessage({ type: 'openHistory' });
