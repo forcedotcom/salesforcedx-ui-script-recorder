@@ -55,8 +55,32 @@ function register(context, outputChannel) {
 
       const cliPath = path.resolve(__dirname, '..', '..', 'recorder-cli', 'bin', 'cli.js');
       const cliRoot = path.resolve(__dirname, '..', '..');
-      const authStatePath = path.join(workspaceFolder.uri.fsPath, 'auth-state.json');
-      const args = [cliPath, 'record', '--url', url, '--output', outputPath, '--save-auth', authStatePath];
+      const authStatesDir = path.join(workspaceFolder.uri.fsPath, 'auth-states');
+      const args = [cliPath, 'record', '--url', url, '--output', outputPath, '--save-auth', authStatesDir];
+
+      // If multiple auth-state files exist for this hostname, let the user pick
+      let hostname;
+      try { hostname = new URL(url).hostname; } catch {}
+      if (hostname && fs.existsSync(authStatesDir)) {
+        const matches = fs.readdirSync(authStatesDir)
+          .filter((f) => f.startsWith(hostname + '---') && f.endsWith('.json'));
+        if (matches.length > 1) {
+          const items = [
+            { label: '$(add) New session', description: 'Start fresh without loading saved auth', file: null },
+            ...matches.map((f) => {
+              const username = f.replace(`${hostname}---`, '').replace(/\.json$/, '');
+              return { label: username, description: f, file: f };
+            }),
+          ];
+          const picked = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Multiple accounts found — select which auth state to load',
+          });
+          if (picked === undefined) return;
+          if (picked.file) {
+            args.push('--load-auth', path.join(authStatesDir, picked.file));
+          }
+        }
+      }
 
       vscode.window.withProgress(
         {

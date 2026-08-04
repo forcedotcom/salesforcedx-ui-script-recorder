@@ -26,6 +26,7 @@ program
   .option('--viewport-height <height>', 'Viewport height', '720')
   .option('--profile-dir <path>', 'Persist Chrome profile to this directory (reuse login across recordings)')
   .option('--save-auth <path>', 'Save device identity cookies (sfdc_lv2) to JSON for MFA bypass on playback')
+  .option('--load-auth <path>', 'Load a specific auth-state JSON file as storageState')
   .option('--cloud <cloud>', 'Cloud identifier for Playwright conversion', '')
   .option('--user <user>', 'Username for Playwright conversion', '')
   .option('--team <team>', 'Team name for Playwright conversion', '')

@@ -1,7 +1,7 @@
 /**
  * Strip Salesforce identity verification steps from a recording.
  *
- * When auth-state.json provides the sfdc_lv2 device cookie, Salesforce skips
+ * When an auth-state file provides the sfdc_lv2 device cookie, Salesforce skips
  * the "Verify Your Identity" screen on playback. But during recording the user
  * still goes through verification (if it's a first-time device). Those steps
  * are useless on replay and cause failures, so we strip them automatically.

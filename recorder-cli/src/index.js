@@ -20,7 +20,8 @@ export async function startRecording(options) {
     viewportWidth,
     viewportHeight,
     profileDir,
-    saveAuth
+    saveAuth,
+    loadAuth
   } = options
 
   // Build the injected script bundle
@@ -84,11 +85,29 @@ export async function startRecording(options) {
       args: chromiumArgs
     })
 
-    // If auth-state.json exists, load it as storageState so device cookies
+    // If an auth-state file exists, load it as storageState so device cookies
     // (sfdc_lv2) are present — this skips the identity verification screen
     // while still replaying login steps (since session cookies are stripped).
-    const authStatePath = saveAuth ? path.resolve(saveAuth) : null
-    const hasAuthState = authStatePath && fs.existsSync(authStatePath)
+    let authStatePath = null
+    if (loadAuth) {
+      const resolved = path.resolve(loadAuth)
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+        authStatePath = resolved
+      }
+    } else if (saveAuth) {
+      const resolved = path.resolve(saveAuth)
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+        let hostname
+        try { hostname = new URL(url).hostname } catch {}
+        if (hostname) {
+          const match = fs.readdirSync(resolved).find((f) => f.startsWith(hostname + '---') && f.endsWith('.json'))
+          authStatePath = match ? path.join(resolved, match) : null
+        }
+      } else if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+        authStatePath = resolved
+      }
+    }
+    const hasAuthState = !!authStatePath
 
     context = await browserInstance.newContext({
       viewport: { width: parseInt(viewportWidth), height: parseInt(viewportHeight) },
@@ -311,7 +330,7 @@ export async function startRecording(options) {
     // but Salesforce skips the identity verification screen.
     if (saveAuth) {
       try {
-        const authPath = path.resolve(saveAuth)
+        const authPath = resolveAuthStatePath(saveAuth, recording, url)
         fs.mkdirSync(path.dirname(authPath), { recursive: true })
         const fullState = await context.storageState()
         const deviceState = stripSessionCookies(fullState)
@@ -349,7 +368,7 @@ export async function startRecording(options) {
       // Try to save device-identity cookies before context is fully destroyed
       if (saveAuth) {
         try {
-          const authPath = path.resolve(saveAuth)
+          const authPath = resolveAuthStatePath(saveAuth, recording, url)
           fs.mkdirSync(path.dirname(authPath), { recursive: true })
           const fullState = await context.storageState()
           const deviceState = stripSessionCookies(fullState)
@@ -678,6 +697,43 @@ function stripSessionCookies(storageState) {
     cookies: filteredCookies,
     origins: [] // Clear localStorage/sessionStorage — only cookies matter for device identity
   }
+}
+
+/**
+ * Resolve the auth state file path based on the URL hostname and the username
+ * found in the recording events. Auth states are stored as:
+ *   <saveAuth>/<hostname>---<username>.json
+ *
+ * If no username can be extracted from the recording, falls back to:
+ *   <saveAuth>/<hostname>---default.json
+ */
+function resolveAuthStatePath(saveAuth, recording, url) {
+  const authDir = path.resolve(saveAuth)
+
+  let hostname = 'unknown'
+  try {
+    hostname = new URL(url).hostname
+  } catch {}
+
+  // Find the username from recorded events — look for a fill/change on an email/username input
+  let username = 'default'
+  for (const event of recording) {
+    if ((event.action === 'change' || event.action === 'input') &&
+        event.tagName === 'INPUT' &&
+        (event.inputType === 'email' || event.inputType === 'text') &&
+        event.value) {
+      // Check if the selector hints at a username/email field
+      const selectorStr = JSON.stringify(event.selectors || []).toLowerCase()
+      if (selectorStr.includes('email') || selectorStr.includes('username') || selectorStr.includes('login') ||
+          event.inputType === 'email') {
+        username = event.value
+        break
+      }
+    }
+  }
+
+  const sanitizedUsername = username.replace(/[/\\:*?"<>|]/g, '_')
+  return path.join(authDir, `${hostname}---${sanitizedUsername}.json`)
 }
 
 function filterSteps(steps) {

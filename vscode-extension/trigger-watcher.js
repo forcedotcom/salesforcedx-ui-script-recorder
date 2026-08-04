@@ -101,8 +101,8 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
   const outputPath = args.output || path.join(recordingsDir, `recording_${timestamp}.json`);
 
   const cliPath = path.resolve(context.extensionPath, 'recorder-cli', 'bin', 'cli.js');
-  const authStatePath = args.saveAuth || path.join(workspaceRoot, 'auth-state.json');
-  const cliArgs = [cliPath, 'record', '--url', args.url || 'about:blank', '--output', outputPath, '--save-auth', authStatePath];
+  const authStatesDir = args.saveAuth || path.join(workspaceRoot, 'auth-states');
+  const cliArgs = [cliPath, 'record', '--url', args.url || 'about:blank', '--output', outputPath, '--save-auth', authStatesDir];
 
   if (args.headless) cliArgs.push('--headless');
   if (args.viewportWidth) cliArgs.push('--viewport-width', String(args.viewportWidth));
