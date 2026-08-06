@@ -1,5 +1,8 @@
-<!-- g-docs:doc_id=17vq8soGK9ZrsXz5NPppE7BIcwb1Z53f2b93f2XzJPbM -->
-**Google Doc:** https://docs.google.com/document/d/17vq8soGK9ZrsXz5NPppE7BIcwb1Z53f2b93f2XzJPbM/edit
+# SF UI Recorder
+
+Record and replay Salesforce UI interactions as Playwright tests directly from VS Code.
+
+---
 
 # Prerequisites
 
@@ -109,10 +112,51 @@ If drag and drop isn't working, you can install from the Command Palette:
 
 After installation, confirm the extension is active:
 
-1. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
-2. Type **"SF UI Recorder"** — you should see the extension's commands appear in the list, including **"SF UI Recorder: Start UI Recording"**.
+1. Open the Activity Bar on the left side of VS Code — you should see a new **Salesforce UI Script Recorder** icon (cloud with a record dot).
+2. Click the icon to open the sidebar panel, which shows three sections: **Recordings**, **User Files**, and **Data Files**.
+3. Alternatively, open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **"SF UI Recorder"** to see the extension's commands.
 
 ![Command Palette showing SF UI Recorder commands](images/onboarding/verify-commands.png)
+
+---
+
+# Sidebar Panel
+
+The extension adds a dedicated sidebar panel to VS Code for managing recordings, credentials, and test data.
+
+![Sidebar panel overview](images/onboarding/sidebar-panel.png)
+
+## Recordings Section
+
+The **Recordings** section shows all recorded UI tests from the `test-plans/playwright/` directory.
+
+- **Start a recording** — Click the **+** button in the header or the "Start UI Recording" welcome button when the list is empty.
+- **Collapse all** — Click the collapse all icon in the header to collapse all expanded recordings at once.
+- **Play a recording** — Click the **▶ Play** button on any recording to open the playback modal.
+- **View history** — Click the **🕒 History** button (visible only if playback results exist) to view past test runs.
+- **Expand/collapse** — Each recording expands to show the `.json` and `.spec.js` files, plus a "Playback Results" group if any runs have completed.
+- **Rename** — Right-click a recording and select **Rename Recording**. Enter a new name, and after confirmation, the extension renames all associated files (`.json`, `.spec.js`) and playback result folders. A confirmation dialog shows exactly how many files and folders will be renamed.
+- **Delete** — Right-click a recording and select **Delete Recording** to remove all associated files and results. (Note: The delete button has been removed from the inline actions for safety — use the right-click menu instead.)
+
+## User Files Section
+
+The **User Files** section lists CSV files from the `user-files/` directory, which contain username/password credentials for bulk playback runs.
+
+- Click the **ℹ️ Info** icon in the header to learn what user files are for.
+- Click the **📁 View in Explorer** icon to reveal the `user-files/` folder in VS Code's file explorer.
+- Click any file to open it for editing.
+
+This section is collapsed by default.
+
+## Data Files Section
+
+The **Data Files** section lists CSV files from the `data-files/` directory, which contain custom parameter values (e.g., account names, phone numbers) for bulk playback runs.
+
+- Click the **ℹ️ Info** icon in the header to learn what data files are for.
+- Click the **📁 View in Explorer** icon to reveal the `data-files/` folder in VS Code's file explorer.
+- Click any file to open it for editing.
+
+This section is collapsed by default.
 
 ---
 
@@ -124,9 +168,9 @@ After installation, confirm the extension is active:
 
 Record browser interactions and automatically generate a Playwright test script.
 
-1. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
-2. Run **"SF UI Recorder: Start UI Recording"**.
-3. Enter the URL you want to record against (e.g., your Salesforce org login page). Leave empty to default to `https://login.salesforce.com`. The extension auto-prepends `https://` if no protocol is provided.
+1. Click the **+** button in the Recordings section of the sidebar, or open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **"SF UI Recorder: Start UI Recording"**.
+2. Enter the URL you want to record against (e.g., your Salesforce org login page). Leave empty to default to `https://login.salesforce.com`. The extension auto-prepends `https://` if no protocol is provided.
+3. **If multiple saved accounts exist for this URL**, a picker appears asking which account's authentication state to load. Select an existing account to skip device verification, or choose "New session" to start fresh.
 4. A browser window will launch with an overlay control bar at the top of the page.
 
 ![Browser overlay during recording](images/onboarding/record-overlay-bar.png)
@@ -137,12 +181,14 @@ Record browser interactions and automatically generate a Playwright test script.
 
 ![VS Code progress notifcation](images/onboarding/vscode-rec-in-progress.png)
 
-7. The extension saves your recording and automatically generates a Playwright test file.
+7. The extension saves your recording and automatically generates a Playwright test file. Your authenticated session (device cookies) is saved to `auth-states/<hostname>---<username>.json` for future use.
 
 Your files are saved in a `test-plans/playwright/` folder in your workspace:
 
 - `recording_<timestamp>.json` — the raw recording data
 - `recording_<timestamp>.spec.js` — the generated Playwright test
+
+The new recording appears immediately in the sidebar's Recordings section.
 
 ![Generated recording files in workspace](images/onboarding/record-output-files.png)
 
@@ -168,22 +214,26 @@ You can also close the browser window to stop recording — the output files wil
 
 Run a previously recorded test in the browser with a single set of credentials and parameters.
 
-1. Open a `.spec.js` file in the editor.
-2. Open the Command Palette and run **"SF UI Recorder: Play Recording"**, or click the **Play** icon (▶) in the editor title bar.
-3. The **Playback modal** opens showing a unified interface with two modes: **Single Run** and **Bulk / Parallel**.
-4. In **Single Run** mode, fill in any required credential fields (username, password) and custom parameter fields.
-5. Click **Run** to execute the test via Playwright in the integrated terminal.
+1. Click the **▶ Play** button on a recording in the sidebar, or open a `.spec.js` file and click the **Play** icon (▶) in the editor title bar.
+2. The **Playback modal** opens showing a unified interface with two modes: **Single Run** and **Bulk / Parallel**.
+3. **Recording selector** — Use the dropdown at the top to switch between different recordings without closing the modal.
+4. **Headed/Headless toggle** — The toggle shows "Headed (show browser)" when enabled and "Headless (hidden browser)" when disabled. The label updates dynamically as you toggle.
+5. In **Single Run** mode, fill in any required credential fields (username, password) and custom parameter fields.
+6. Click **Run** to execute the test via Playwright in the integrated terminal.
 
 ![Playback modal — Single Run mode](images/onboarding/playback-single-run-mode.png)
 
 #### Playback Modal Features (Single Run)
 
+- **Recording selector** — Dropdown in the header to switch between recordings. The modal updates in-place without flickering.
 - **Mode toggle** — Switch between "▶ Single Run" and "☰ Bulk / Parallel" using the tab-style toggle at the top.
+- **Headed/Headless toggle** — Shows the current browser mode ("Headed (show browser)" or "Headless (hidden browser)"). Updates dynamically.
 - **Credential fields** — Username and password fields are displayed at the top. Password field is masked for security.
 - **Custom parameter fields** — Any additional parameterized values (e.g., account name, phone number) appear below under a "Custom Parameters" heading.
 - **Session caching** — Values are cached for the current VS Code session so you only need to enter them once.
 - **Run button** — Disabled until all required fields are filled. Shows a green play icon.
 - **Spec file badge** — Clickable badge in the header that opens the spec file in the editor.
+- **History badge** — Clickable badge (visible only if results exist) that opens the results viewer.
 
 > **Note:** On first playback, the extension may prompt you to create a supporting config file (`config/config.js`). Accept the prompt to generate it automatically.
 
@@ -264,18 +314,37 @@ When you click **Play Recording**, the Playback modal appears with input fields 
 
 ---
 
+### View Playback Results
+
+After running a test, results are saved to the `playback-results/` directory and appear in the sidebar under each recording.
+
+1. In the sidebar's Recordings section, expand a recording that has been played back at least once.
+2. You'll see a **"Playback Results"** group showing timestamped folders for each run.
+3. Click the **🕒 History** button on the recording, or click a specific result folder to view:
+   - Test output and screenshots
+   - Pass/fail status for each step
+   - Execution timeline
+   - HTML export option for shareable reports
+
+**Result folder naming:**
+
+- Single runs: `<recording-name>---<timestamp>`
+- Bulk runs: `<recording-name>---<timestamp>---BULK/` with `session-1/`, `session-2/`, etc. subdirectories
+
+You can right-click a result folder and select **"View result files"** to jump to that folder in the sidebar's expanded tree view.
+
+---
+
 ## Utility Features
 
-> **Important:** Parameterizing a step and re-converting to Playwright will **overwrite** your `.spec.js` file. Any manual edits you have made to the generated script will be lost. If you need to customize a test beyond what parameterization offers, do so *after* you are finished parameterizing all steps.
+> **Important:** Parameterizing a step will automatically regenerate your `.spec.js` file, **overwriting** any manual edits. If you need to customize a test beyond what parameterization offers, do so *after* you are finished parameterizing all steps.
 
 ### Parameterize a Step
 
 Replace a recorded value with a dynamic variable — useful for making tests reusable across environments or with different data each run.
 
-1. Open a recording `.json` file (or `.spec.js` file) in the editor.
+1. Open a recording `.spec.js` file in the editor.
 2. Look for the **CodeLens** action above each input step (e.g., `+Parameterize "Opportunity Name"`).
-
-![CodeLens parameterize actions on recording JSON](images/onboarding/codelens-json.png)
 
 ![CodeLens parameterize actions on spec file](images/onboarding/codelens-spec.png)
 
@@ -287,11 +356,11 @@ Replace a recorded value with a dynamic variable — useful for making tests reu
 
 4. After parameterizing, the `.spec.js` file is automatically regenerated.
 
+> **Note:** Parameterization CodeLens buttons are only shown in the `.spec.js` file, not the `.json` file. Username and password fields are automatically parameterized during recording.
+
 #### Gutter Decorations
 
-Parameterized steps are marked with a teal icon in the editor gutter and highlighted in the overview ruler, making it easy to scan which steps are dynamic at a glance.
-
-![Gutter decoration icons for parameterized steps](images/onboarding/gutter-decorations.png)
+Parameterized steps are marked with a teal icon in the editor gutter (in the `.spec.js` file) and highlighted in the overview ruler, making it easy to scan which steps are dynamic at a glance.
 
 ![Gutter decoration icons for parameterized steps](images/onboarding/gutter-decorations-spec.png)
 
@@ -303,9 +372,12 @@ Regenerate the `.spec.js` test file from the recording JSON. Useful after manual
 
 1. Open a recording `.json` file.
 2. Click the **"$(refresh) Re-convert to Playwright"** CodeLens link at the top of the file.
-3. The corresponding `.spec.js` is regenerated and opened in the editor.
+3. A warning modal appears explaining that reconversion will overwrite any manual changes to the `.spec.js` file. Click **"Proceed"** to continue or **"Cancel"** to abort.
+4. The corresponding `.spec.js` is regenerated and opened in the editor.
 
 ![Re-convert to Playwright CodeLens](images/onboarding/reconvert-codelens.png)
+
+> **Warning:** Re-converting will overwrite your `.spec.js` file. Any manual edits you've made to the generated script will be lost. Always parameterize steps via the JSON file *before* making manual customizations to the spec file.
 
 ---
 
@@ -322,29 +394,39 @@ Set up the Model Context Protocol (MCP) integration for use with Agentforce AI t
 
 ---
 
-## Session Persistence (Skipping MFA on Playback)
+## Multi-Account Session Persistence (Skipping MFA)
 
-For Salesforce orgs with MFA, the extension automatically persists your authenticated session so that:
+For Salesforce orgs with MFA, the extension automatically persists authenticated sessions for multiple accounts so that:
 
-1. You only log in once across multiple recording sessions
+1. You only log in once per account across multiple recording sessions
 2. Playwright test playback skips authentication entirely
+3. You can switch between accounts without re-authenticating
 
 ### How It Works
 
-When you finish a recording session, the extension automatically saves cookies and localStorage to an `auth-state.json` file in your workspace root. The `playwright.config.js` (auto-generated if missing) loads this file during test playback, restoring the browser session without requiring login.
+When you finish a recording session, the extension automatically saves device identity cookies (like `sfdc_lv2`) to `auth-states/<hostname>---<username>.json` in your workspace. The `playwright.config.js` (auto-generated if missing) loads the appropriate auth state during playback based on the username parameter, restoring the browser's device trust without requiring login.
+
+**Multi-account support:**
+
+- Each Salesforce account gets its own auth state file, identified by hostname and username (e.g., `auth-states/login.salesforce.com---user@example.com.json`).
+- When starting a recording, if multiple accounts exist for the target URL, a picker appears asking which account to use.
+- During playback, the extension automatically selects the correct auth state based on the username you provide in the playback form.
 
 The auth state is continuously updated after each successful recording, so the cookie stays fresh. If the session expires (typically 2–12 hours for Salesforce orgs), simply start a new recording and log in again — the auth state will refresh automatically.
 
 ### Workflow
 
 ```bash
-# First recording — log in manually (including MFA)
-# auth-state.json is saved automatically
+# First recording for user1@example.com — log in manually (including MFA)
+# auth-states/login.salesforce.com---user1@example.com.json is saved automatically
 
-# Subsequent recordings — already authenticated, no login needed
-# auth-state.json is refreshed
+# Recording for user2@example.com — prompted to pick existing or start new
+# auth-states/login.salesforce.com---user2@example.com.json is saved automatically
 
-# Playback — auth-state.json is loaded automatically by playwright.config.js
+# Subsequent recordings — picker shows both accounts, select to skip verification
+# Selected auth state is loaded and refreshed
+
+# Playback — correct auth state is loaded based on username parameter
 npx playwright test --headed
 ```
 
@@ -396,7 +478,7 @@ See all available recordings in your workspace.
 # Known Limitations
 
 - **Hover interactions are not captured.** UI elements that only appear on hover (e.g., tooltips, dropdown menus triggered by mouseover) will not be recorded. Tests that depend on these elements will fail during playback. Hover event support is not yet available.
-- **MFA requires manual verification on first recording.** During your first recording session, you will need to manually complete the MFA challenge. On subsequent recordings and playbacks, MFA should be bypassed automatically — the extension saves the MFA cookie in `auth-state.json` for reuse, as long as you are on the same user account. The auth state is continuously updated after each successful login, so the cookie should stay fresh. If issues arise, you may need to manually enter the MFA code again during recording and/or playback.
+- **MFA requires manual verification on first recording per account.** During your first recording session for a given account, you will need to manually complete the MFA challenge. On subsequent recordings and playbacks with that account, MFA should be bypassed automatically — the extension saves device identity cookies in `auth-states/<hostname>---<username>.json` for reuse. The auth state is continuously updated after each successful login, so the cookie should stay fresh. If issues arise, you may need to manually enter the MFA code again during recording and/or playback.
 - **One-time UI elements will cause playback failures.** If you interact with transient elements during recording — such as popovers, toast notifications, or first-time-use prompts — those steps will likely fail on playback since the elements won't be present on subsequent runs. For now, you will need to manually remove those steps from the recording JSON. Automatic detection and filtering of one-time elements is planned for a future release.
 - **Salesforce sessions expire.** Auth state typically lasts 2–12 hours. When the session expires, re-run the recorder and log in again to refresh the stored state.
 - **Chromium only.** Recording uses Chrome DevTools Protocol (CDP) isolated world injection and only works with Chromium-based browsers.
