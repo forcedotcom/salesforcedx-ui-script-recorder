@@ -5,6 +5,13 @@ recording.json
 test-plans/
 .DS_Store
 auth-state.json
+auth-states/
 .chrome-profile/
 .sf-ui-recorder/
 playback-results/
+.agents/
+docs/
+recordings/
+test-results/
+*.vsix
+*.vsix.zip
