@@ -1,7 +1,7 @@
 {
   "name": "sf-ui-recorder",
   "displayName": "SF UI Recorder",
-  "version": "1.1.0",
+  "version": "1.3.0",
   "description": "VS Code Extension wrapping a CLI tool for recording Salesforce UI browser interactions with an overlay interface",
   "publisher": "salesforce",
   "license": "BSD-3-Clause",
@@ -216,11 +216,6 @@
           "command": "sf-ui-recorder.renameRecording",
           "when": "view == sfUiRecorderRecordings && viewItem == recording || view == sfUiRecorderRecordings && viewItem == recordingWithResults",
           "group": "inline@3"
-        },
-        {
-          "command": "sf-ui-recorder.deleteRecording",
-          "when": "view == sfUiRecorderRecordings && viewItem == recording || view == sfUiRecorderRecordings && viewItem == recordingWithResults",
-          "group": "inline@4"
         },
         {
           "command": "sf-ui-recorder.playRecording",
