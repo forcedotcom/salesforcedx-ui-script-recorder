@@ -1655,6 +1655,14 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     modeSingleBtn.addEventListener('click', () => setMode('single'));
     modeBulkBtn.addEventListener('click', () => setMode('bulk'));
 
+    const headedToggle = document.getElementById('headed-toggle');
+    const headedLabel = document.querySelector('label[for="headed-toggle"]');
+    function updateHeadedLabel() {
+      headedLabel.textContent = headedToggle.checked ? 'Headed (show browser)' : 'Headless (hidden browser)';
+    }
+    headedToggle.addEventListener('change', updateHeadedLabel);
+    updateHeadedLabel();
+
     function validateForm() {
       if (mode === 'bulk') {
         const hasUsers = selectedUserRows > 0;
