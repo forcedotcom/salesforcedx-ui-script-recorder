@@ -7,7 +7,7 @@
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
-    "url": "git@git.soma.salesforce.com:joseph-reusing/sf-ui-recorder.git"
+    "url": "git@github.com:forcedotcom/salesforcedx-ui-recorder.git"
   },
   "icon": "images/icon.png",
   "readme": "README.md",
