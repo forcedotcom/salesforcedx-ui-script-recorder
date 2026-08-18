@@ -1656,6 +1656,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       singleContent.classList.toggle('active', mode === 'single');
       bulkContent.classList.toggle('active', mode === 'bulk');
       document.getElementById('headed-toggle').checked = mode === 'single';
+      updateHeadedLabel();
       vscode.postMessage({ type: 'modeChange', data: mode });
       validateForm();
     }
