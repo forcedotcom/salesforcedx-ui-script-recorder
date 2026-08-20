@@ -181,30 +181,25 @@ You can also close the browser window to stop recording — the output files wil
 
 ---
 
-### Play Back a Test (Single Run)
+### Play Back a Test
 
-Run a previously recorded test in the browser with a single set of credentials and parameters.
+Click the **▶ Play** button on a recording in the sidebar, or open a `.spec.js` file and click the **Play** icon (▶) in the editor title bar. This opens the **Playback modal**, shared by both run modes below:
 
-1. Click the **▶ Play** button on a recording in the sidebar, or open a `.spec.js` file and click the **Play** icon (▶) in the editor title bar.
-2. The **Playback modal** opens showing a unified interface with two modes: **Single Run** and **Bulk / Parallel**.
-3. **Recording selector** — Use the dropdown at the top to switch between different recordings without closing the modal.
-4. **Headed/Headless toggle** — The toggle shows "Headed (show browser)" when enabled and "Headless (hidden browser)" when disabled. The label updates dynamically as you toggle.
-5. In **Single Run** mode, fill in any required credential fields (username, password) and custom parameter fields.
-6. Click **Run** to execute the test via Playwright in the integrated terminal.
+- **Recording selector** — Dropdown in the header to switch between recordings without closing the modal.
+- **Mode toggle** — Switch between **▶ Single Run** and **☰ Bulk / Parallel**.
+- **Headed/Headless toggle** — Controls whether the browser is visible during the run. **Single Run defaults to headed**; **Bulk defaults to headless** (so spawning many sessions doesn't open dozens of windows). Switching modes resets the toggle to that mode's default, but you can flip it either way before clicking Run.
+- **Spec file / History badges** — Clickable shortcuts to open the spec file, or the results viewer (History only appears once the recording has been played back).
+
+---
+
+### Single Run
+
+Runs the test once with one set of credentials and parameters.
+
+1. Fill in the credential fields (username, password — masked) and any custom parameter fields. Values are cached for the current VS Code session, so you only need to enter them once.
+2. Click **Run**. The extension executes the test via Playwright in an integrated terminal.
 
 ![Playback modal — Single Run mode](images/onboarding/playback-single-run-mode.png)
-
-#### Playback Modal Features (Single Run)
-
-- **Recording selector** — Dropdown in the header to switch between recordings. The modal updates in-place without flickering.
-- **Mode toggle** — Switch between "▶ Single Run" and "☰ Bulk / Parallel" using the tab-style toggle at the top.
-- **Headed/Headless toggle** — Shows the current browser mode ("Headed (show browser)" or "Headless (hidden browser)"). Updates dynamically.
-- **Credential fields** — Username and password fields are displayed at the top. Password field is masked for security.
-- **Custom parameter fields** — Any additional parameterized values (e.g., account name, phone number) appear below under a "Custom Parameters" heading.
-- **Session caching** — Values are cached for the current VS Code session so you only need to enter them once.
-- **Run button** — Disabled until all required fields are filled. Shows a green play icon.
-- **Spec file badge** — Clickable badge in the header that opens the spec file in the editor.
-- **History badge** — Clickable badge (visible only if results exist) that opens the results viewer.
 
 > **Note:** On first playback, the extension may prompt you to create a supporting config file (`config/config.js`). Accept the prompt to generate it automatically.
 
@@ -212,30 +207,16 @@ Run a previously recorded test in the browser with a single set of credentials a
 
 ---
 
-### Play Back a Test (Bulk / Parallel Run)
+### Bulk / Parallel Run
 
-Run multiple test sessions in parallel, each with different credentials and data from CSV files.
+Runs many sessions at once in parallel, each with its own credentials and data pulled from CSV files.
 
-1. Open a `.spec.js` file and trigger **"SF UI Recorder: Play Recording"**.
-2. In the Playback modal, click **"☰ Bulk / Parallel"** to switch modes.
-3. Select a **User credentials file** from the dropdown (CSV files from the `user-files/` directory).
-4. Select one or more **Custom parameter data files** from the chip-based multi-select (CSV files from the `data-files/` directory).
-5. Set the number of **Sessions** (parallel runs, 1–100).
-6. Click **Run** — the extension spawns one terminal per session, cycling through CSV rows if there are more sessions than data rows.
+1. Select a **user credentials file** from the dropdown (CSV files from `user-files/`), or click **+ Create CSV** to generate a skeleton `users.csv`.
+2. Select one or more **data files** from `data-files/` using the chip-based multi-select. A coverage indicator shows which custom parameters are covered by your selected files (green ✓ = covered, red ✗ = uncovered); if two files define the same column, a warning shows that the last one wins.
+3. Set the number of **Sessions** (parallel runs, 1–100).
+4. Click **Run** — the extension spawns one terminal per session, cycling through CSV rows from the top if there are more sessions than rows (a warning explains this).
 
 ![Playback modal — Bulk / Parallel mode](images/onboarding/playback-bulk-mode.png)
-
-#### Bulk Run Features
-
-- **User credential file dropdown** — Select a CSV from `user-files/`. Shows user count after selection (e.g., "3 user accounts loaded").
-- **Create CSV wizard** — Click "+ Create CSV" at the bottom of the dropdown to generate a skeleton `users.csv` with username/password columns. You can name the file and it opens alongside for editing.
-- **Data file multi-select** — Chip-based interface where each selected file appears as a removable chip. Click "+ Create CSV" to generate a new data file with columns matching your test's parameterized values.
-- **Parameter coverage indicators** — Shows which parameters are covered by selected data files (green ✓ = covered, red ✗ = uncovered).
-- **Column overlap warnings** — If multiple data files define the same column, a warning shows which file takes precedence (last file wins).
-- **Cycle warnings** — If the number of sessions exceeds available CSV rows, a yellow warning explains that data will cycle from the beginning.
-- **Folder badges** — Clickable `📁 user-files/` and `📁 data-files/` badges that reveal the folder in the VS Code explorer.
-- **File links in warnings** — Clickable file names in warning messages that open the CSV file for editing (with "Edit CSV" tooltip on hover).
-- **Sessions field** — Set the number of parallel terminals to spawn (1–100). Validates input with inline error messages.
 
 #### CSV File Format
 
