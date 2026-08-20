@@ -77,36 +77,7 @@ You're all set! Proceed to the next section to install the extension.
 
 # Installing the Extension
 
-SF UI Recorder is distributed as a `.vsix` file during the pilot phase. Follow these steps to install it in any VS Code-based editor (VS Code, Code for Salesforce, Cursor, etc.).
-
-## Method 1: Drag and Drop
-
-1. Open your VS Code-based editor.
-
-2. Locate the `.vsix` file on your desktop or file system.
-
-3. Drag and drop the `.vsix` file directly into the VS Code window (specifically onto the Extensions panel or the editor area).
-
-![Dragging the VSIX file from desktop into VS Code](images/onboarding/install-drag-drop.png)
-
-4. The extension will install automatically. You'll see a **"Completed installing extension."** notification at the bottom of the editor.
-
-![Extension installed successfully — notification at bottom](images/onboarding/install-completed-notification.png)
-
-## Method 2: Install via Command Palette
-
-If drag and drop isn't working, you can install from the Command Palette:
-
-1. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
-2. Type **"install"** and select **"Extensions: Install from VSIX..."**.
-
-![Command Palette showing "Extensions: Install from VSIX..." option](images/onboarding/install-command-palette.png)
-
-3. Browse to and select the `.vsix` file in the file picker dialog.
-
-4. The extension installs and you'll see the **"Completed installing extension."** confirmation.
-
-![Extension installed successfully — notification at bottom](images/onboarding/install-completed-notification.png)
+SF UI Recorder is not yet available for installation — we're working on publishing it to the VS Code Marketplace. Once published, you'll be able to install it directly from the Extensions panel. This README will be updated with installation instructions at that time.
 
 ## Verify Installation
 
