@@ -197,7 +197,8 @@ Click the **▶ Play** button on a recording in the sidebar, or open a `.spec.js
 Runs the test once with one set of credentials and parameters.
 
 1. Fill in the credential fields (username, password — masked) and any custom parameter fields. Values are cached for the current VS Code session, so you only need to enter them once.
-2. Click **Run**. The extension executes the test via Playwright in an integrated terminal.
+2. Leave the **Headed/Headless toggle** as-is to watch the browser (default for Single Run), or switch it off to run hidden.
+3. Click **Run**. The extension executes the test via Playwright in an integrated terminal.
 
 ![Playback modal — Single Run mode](images/onboarding/playback-single-run-mode.png)
 
@@ -214,7 +215,8 @@ Runs many sessions at once in parallel, each with its own credentials and data p
 1. Select a **user credentials file** from the dropdown (CSV files from `user-files/`), or click **+ Create CSV** to generate a skeleton `users.csv`.
 2. Select one or more **data files** from `data-files/` using the chip-based multi-select. A coverage indicator shows which custom parameters are covered by your selected files (green ✓ = covered, red ✗ = uncovered); if two files define the same column, a warning shows that the last one wins.
 3. Set the number of **Sessions** (parallel runs, 1–100).
-4. Click **Run** — the extension spawns one terminal per session, cycling through CSV rows from the top if there are more sessions than rows (a warning explains this).
+4. Leave the **Headed/Headless toggle** off to run hidden (default for Bulk, so you don't get a window per session), or switch it on to watch the browsers.
+5. Click **Run** — the extension spawns one terminal per session, cycling through CSV rows from the top if there are more sessions than rows (a warning explains this).
 
 ![Playback modal — Bulk / Parallel mode](images/onboarding/playback-bulk-mode.png)
 
