@@ -16,7 +16,7 @@ npm install
 
 ```bash
 # Record a session
-npx sf-ui-recorder record --url https://myorg.salesforce.com -o ./test-plans/playwright/test.json
+npx salesforce-ui-script-recorder record --url https://myorg.salesforce.com -o ./test-plans/playwright/test.json
 
 # Run the generated Playwright test
 npx playwright test --headed
@@ -29,7 +29,7 @@ npx playwright test --headed
 Launch a browser and record user interactions. Outputs a JSON recording and a Playwright test script.
 
 ```bash
-npx sf-ui-recorder record [options]
+npx salesforce-ui-script-recorder record [options]
 ```
 
 | Option | Default | Description |
@@ -51,7 +51,7 @@ npx sf-ui-recorder record [options]
 **Example:**
 
 ```bash
-npx sf-ui-recorder record \
+npx salesforce-ui-script-recorder record \
   --url https://myorg.lightning.force.com \
   --profile-dir ./.chrome-profile \
   --save-auth ./auth-state.json \
@@ -63,7 +63,7 @@ npx sf-ui-recorder record \
 Convert an existing JSON recording to a Playwright test script (without re-recording).
 
 ```bash
-npx sf-ui-recorder convert <input> [options]
+npx salesforce-ui-script-recorder convert <input> [options]
 ```
 
 | Option | Default | Description |
@@ -76,7 +76,7 @@ npx sf-ui-recorder convert <input> [options]
 **Example:**
 
 ```bash
-npx sf-ui-recorder convert ./test-plans/playwright/create-account.json
+npx salesforce-ui-script-recorder convert ./test-plans/playwright/create-account.json
 ```
 
 ## Overlay Controls
@@ -106,14 +106,14 @@ For Salesforce orgs with MFA, you can persist your authenticated session so that
 
 ```bash
 # First recording — log in manually (including MFA)
-npx sf-ui-recorder record \
+npx salesforce-ui-script-recorder record \
   --url https://myorg.salesforce.com \
   --profile-dir ./.chrome-profile \
   --save-auth ./auth-state.json \
   -o ./test-plans/playwright/test-flow.json
 
 # Second recording — already authenticated, no login needed
-npx sf-ui-recorder record \
+npx salesforce-ui-script-recorder record \
   --url https://myorg.lightning.force.com/lightning/o/Account/list \
   --profile-dir ./.chrome-profile \
   --save-auth ./auth-state.json \
@@ -143,7 +143,7 @@ RECORDER_USERNAME="user@example.com" RECORDER_PASSWORD="pass" npx playwright tes
 ## Project Structure
 
 ```
-sf-ui-recorder/
+salesforce-ui-script-recorder/
 ├── bin/cli.js                        # CLI entry point
 ├── src/
 │   ├── index.js                      # Main orchestrator (Playwright + CDP + WS)

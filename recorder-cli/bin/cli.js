@@ -17,7 +17,7 @@ import fs from 'fs'
 import path from 'path'
 
 program
-  .name('sf-ui-recorder')
+  .name('salesforce-ui-script-recorder')
   .description('Record browser interactions via a CLI with an in-page overlay')
   .version('1.0.0')
 

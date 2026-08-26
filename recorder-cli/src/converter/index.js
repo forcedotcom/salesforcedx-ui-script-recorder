@@ -69,7 +69,7 @@ test.afterEach(async ({ page, context }) => {
     if (deviceCookies.some((c) => c.name === 'sfdc_lv2')) {
       const deviceState = { cookies: deviceCookies, origins: [] };
       const hostname = new URL(page.url()).hostname;
-      const username = (process.env.SF_UI_RECORDER_USERNAME || process.env.SF_UI_RECORDER_EMAIL || 'default').replace(/[\\/\\\\:*?"<>|]/g, '_');
+      const username = (process.env.SALESFORCE_UI_SCRIPT_RECORDER_USERNAME || process.env.SALESFORCE_UI_SCRIPT_RECORDER_EMAIL || 'default').replace(/[\\/\\\\:*?"<>|]/g, '_');
       const authDir = './auth-states';
       fs.mkdirSync(authDir, { recursive: true });
       fs.writeFileSync(path.join(authDir, \`\${hostname}---\${username}.json\`), JSON.stringify(deviceState, null, 2));

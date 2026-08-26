@@ -43,9 +43,9 @@ function activate(context) {
   const recordingsTree = new RecordingsTreeProvider();
   const userFilesTree = new FileListTreeProvider('user-files');
   const dataFilesTree = new FileListTreeProvider('data-files');
-  const recordingsTreeView = vscode.window.createTreeView('sfUiRecorderRecordings', { treeDataProvider: recordingsTree, showCollapseAll: true });
-  const userFilesTreeView = vscode.window.createTreeView('sfUiRecorderUserFiles', { treeDataProvider: userFilesTree });
-  const dataFilesTreeView = vscode.window.createTreeView('sfUiRecorderDataFiles', { treeDataProvider: dataFilesTree });
+  const recordingsTreeView = vscode.window.createTreeView('salesforceUiScriptRecorderRecordings', { treeDataProvider: recordingsTree, showCollapseAll: true });
+  const userFilesTreeView = vscode.window.createTreeView('salesforceUiScriptRecorderUserFiles', { treeDataProvider: userFilesTree });
+  const dataFilesTreeView = vscode.window.createTreeView('salesforceUiScriptRecorderDataFiles', { treeDataProvider: dataFilesTree });
   const recordingsWatcher = vscode.workspace.createFileSystemWatcher('**/test-plans/playwright/**');
   recordingsWatcher.onDidCreate(() => { recordingsTree.refresh(); userFilesTree.refresh(); dataFilesTree.refresh(); });
   recordingsWatcher.onDidDelete(() => { recordingsTree.refresh(); userFilesTree.refresh(); dataFilesTree.refresh(); });
@@ -81,22 +81,22 @@ function activate(context) {
     reconvert.register(context),
     installMcpConfig.register(context),
     resultsViewer.register(context),
-    vscode.commands.registerCommand('sf-ui-recorder.viewRecordingHistory', (treeItem) => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.viewRecordingHistory', (treeItem) => {
       if (treeItem && treeItem.baseName) {
-        vscode.commands.executeCommand('sf-ui-recorder.viewResults', treeItem.baseName);
+        vscode.commands.executeCommand('salesforce-ui-script-recorder.viewResults', treeItem.baseName);
       }
     }),
-    vscode.commands.registerCommand('sf-ui-recorder.playRecording', async (treeItem) => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.playRecording', async (treeItem) => {
       if (treeItem && treeItem.baseName) {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
         if (!workspaceFolder) return;
         const specPath = path.join(workspaceFolder.uri.fsPath, 'test-plans', 'playwright', treeItem.baseName + '.spec.js');
         const doc = await vscode.workspace.openTextDocument(specPath);
         await vscode.window.showTextDocument(doc);
-        vscode.commands.executeCommand('sf-ui-recorder.playbackScript');
+        vscode.commands.executeCommand('salesforce-ui-script-recorder.playbackScript');
       }
     }),
-    vscode.commands.registerCommand('sf-ui-recorder.renameRecording', async (treeItem) => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.renameRecording', async (treeItem) => {
       if (!treeItem || !treeItem.baseName) return;
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) return;
@@ -162,7 +162,7 @@ function activate(context) {
         vscode.window.showErrorMessage(`Salesforce UI Script Recorder: Rename failed — ${e.message}`);
       }
     }),
-    vscode.commands.registerCommand('sf-ui-recorder.deleteRecording', async (treeItem) => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.deleteRecording', async (treeItem) => {
       if (!treeItem || !treeItem.baseName) return;
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) return;
@@ -211,57 +211,57 @@ function activate(context) {
         vscode.window.showErrorMessage(`Salesforce UI Script Recorder: Delete failed — ${e.message}`);
       }
     }),
-    vscode.commands.registerCommand('sf-ui-recorder.revealResultFolder', async (resultFolderName) => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.revealResultFolder', async (resultFolderName) => {
       if (!resultFolderName) return;
       const element = recordingsTree.findResultElement(resultFolderName);
       if (element) {
         try {
           await recordingsTreeView.reveal(element, { expand: true, focus: true });
         } catch {
-          vscode.commands.executeCommand('sfUiRecorderRecordings.focus');
+          vscode.commands.executeCommand('salesforceUiScriptRecorderRecordings.focus');
         }
       } else {
-        vscode.commands.executeCommand('sfUiRecorderRecordings.focus');
+        vscode.commands.executeCommand('salesforceUiScriptRecorderRecordings.focus');
       }
     }),
-    vscode.commands.registerCommand('sf-ui-recorder.infoUserFiles', () => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.infoUserFiles', () => {
       vscode.window.showInformationMessage(
         'User Files contain credential CSVs (username, password) used during bulk playback. Each row represents a different user account that sessions cycle through.'
       );
     }),
-    vscode.commands.registerCommand('sf-ui-recorder.infoDataFiles', () => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.infoDataFiles', () => {
       vscode.window.showInformationMessage(
         'Data Files contain CSVs with custom parameter values for bulk playback. Column headers map to parameterized fields in your scripts, and each row provides data for a session.'
       );
     }),
-    vscode.commands.registerCommand('sf-ui-recorder.revealUserFilesInExplorer', () => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.revealUserFilesInExplorer', () => {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) return;
       const folderPath = path.join(workspaceFolder.uri.fsPath, 'user-files');
       if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
       vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(folderPath));
     }),
-    vscode.commands.registerCommand('sf-ui-recorder.revealDataFilesInExplorer', () => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.revealDataFilesInExplorer', () => {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) return;
       const folderPath = path.join(workspaceFolder.uri.fsPath, 'data-files');
       if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
       vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(folderPath));
     }),
-    vscode.commands.registerCommand('sf-ui-recorder.revealFileSection', async (folder) => {
+    vscode.commands.registerCommand('salesforce-ui-script-recorder.revealFileSection', async (folder) => {
       if (folder === 'user-files') {
         const first = userFilesTree.getFirstChild();
         if (first) {
           await userFilesTreeView.reveal(first, { select: true, focus: true });
         } else {
-          vscode.commands.executeCommand('sfUiRecorderUserFiles.focus');
+          vscode.commands.executeCommand('salesforceUiScriptRecorderUserFiles.focus');
         }
       } else if (folder === 'data-files') {
         const first = dataFilesTree.getFirstChild();
         if (first) {
           await dataFilesTreeView.reveal(first, { select: true, focus: true });
         } else {
-          vscode.commands.executeCommand('sfUiRecorderDataFiles.focus');
+          vscode.commands.executeCommand('salesforceUiScriptRecorderDataFiles.focus');
         }
       }
     })

@@ -12,9 +12,9 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
  * MCP Server for Salesforce UI Script Recorder
  *
  * Communicates with the VS Code extension via file-based triggers:
- *   1. Writes a command to <workspace>/.sf-ui-recorder/trigger.json
+ *   1. Writes a command to <workspace>/.salesforce-ui-script-recorder/trigger.json
  *   2. Extension picks it up, executes it (in terminal/output channel)
- *   3. Extension writes result to <workspace>/.sf-ui-recorder/result.json
+ *   3. Extension writes result to <workspace>/.salesforce-ui-script-recorder/result.json
  *   4. MCP server reads the result and returns it to the agent
  *
  * The workspace path is derived from the CWD that Agentforce sets when
@@ -31,9 +31,9 @@ import path from 'path'
 import fs from 'fs'
 
 // The workspace root is the cwd that Agentforce/VS Code sets when spawning us.
-// Fall back to SF_UI_RECORDER_WORKSPACE env var if set.
-const WORKSPACE_ROOT = process.env.SF_UI_RECORDER_WORKSPACE || process.cwd()
-const TRIGGER_DIR = path.join(WORKSPACE_ROOT, '.sf-ui-recorder')
+// Fall back to SALESFORCE_UI_SCRIPT_RECORDER_WORKSPACE env var if set.
+const WORKSPACE_ROOT = process.env.SALESFORCE_UI_SCRIPT_RECORDER_WORKSPACE || process.cwd()
+const TRIGGER_DIR = path.join(WORKSPACE_ROOT, '.salesforce-ui-script-recorder')
 const TRIGGER_FILE = path.join(TRIGGER_DIR, 'trigger.json')
 const RESULT_FILE = path.join(TRIGGER_DIR, 'result.json')
 
@@ -43,7 +43,7 @@ const POLL_INTERVAL_MS = 500
 
 const server = new Server(
   {
-    name: 'sf-ui-recorder',
+    name: 'salesforce-ui-script-recorder',
     version: '1.0.0',
   },
   {

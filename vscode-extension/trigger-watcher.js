@@ -13,12 +13,12 @@ const { spawn } = require('child_process');
 const { ensurePlaywrightConfig } = require('./ensure-playwright-config');
 const { resolveNodePath } = require('./resolve-node');
 
-const TRIGGER_DIR = '.sf-ui-recorder';
+const TRIGGER_DIR = '.salesforce-ui-script-recorder';
 const TRIGGER_FILE = 'trigger.json';
 const RESULT_FILE = 'result.json';
 
 /**
- * Set up a file-system watcher on .sf-ui-recorder/trigger.json in the workspace.
+ * Set up a file-system watcher on .salesforce-ui-script-recorder/trigger.json in the workspace.
  * When the MCP server writes a command to that file, this watcher picks it up,
  * executes it in the VS Code terminal, and writes the result back.
  */

@@ -15,7 +15,7 @@ const { resolveNodePath } = require('../resolve-node');
 
 function register(context, outputChannel) {
   return vscode.commands.registerCommand(
-    'sf-ui-recorder.startRecording',
+    'salesforce-ui-script-recorder.startRecording',
     async () => {
       const DEFAULT_URL = 'https://login.salesforce.com';
 

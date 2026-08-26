@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test';
 // --- Config provider (do not edit) ---
 const config = {
       get(key) {
-            const envKey = \`SF_UI_RECORDER_\${key.toUpperCase()}\`;
+            const envKey = \`SALESFORCE_UI_SCRIPT_RECORDER_\${key.toUpperCase()}\`;
             const value = process.env[envKey];
             if (!value) {
                   throw new Error(\`Missing config "\${key}". Set environment variable \${envKey} before running the test.\`);

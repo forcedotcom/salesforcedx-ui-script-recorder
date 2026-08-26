@@ -12,18 +12,18 @@ const path = require('path');
 const PLAYWRIGHT_CONFIG_CONTENT = `import { defineConfig } from '@playwright/test'
 import fs from 'fs'
 
-const authStatePath = process.env.SF_UI_RECORDER_AUTH_STATE || ''
+const authStatePath = process.env.SALESFORCE_UI_SCRIPT_RECORDER_AUTH_STATE || ''
 const hasAuthState = authStatePath && fs.existsSync(authStatePath)
-const headless = process.env.SF_UI_RECORDER_HEADLESS === '1'
+const headless = process.env.SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS === '1'
 
 export default defineConfig({
   testDir: '.',
   testMatch: '**/*.spec.js',
   timeout: 0,
-  outputDir: './.sf-ui-recorder/test-output',
+  outputDir: './.salesforce-ui-script-recorder/test-output',
   reporter: [
     ['list'],
-    ['./.sf-ui-recorder/reporter.js'],
+    ['./.salesforce-ui-script-recorder/reporter.js'],
   ],
   use: {
     headless,
@@ -103,9 +103,9 @@ function ensurePlaywrightConfig(workspaceRoot, extensionPath) {
     }
   }
 
-  // Always sync the reporter from the extension into .sf-ui-recorder/
+  // Always sync the reporter from the extension into .salesforce-ui-script-recorder/
   const reporterSource = path.join(extensionPath, 'recorder-cli', 'src', 'reporter.js');
-  const reporterDest = path.join(workspaceRoot, '.sf-ui-recorder', 'reporter.js');
+  const reporterDest = path.join(workspaceRoot, '.salesforce-ui-script-recorder', 'reporter.js');
   if (fs.existsSync(reporterSource)) {
     fs.mkdirSync(path.dirname(reporterDest), { recursive: true });
     fs.copyFileSync(reporterSource, reporterDest);

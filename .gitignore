@@ -7,7 +7,7 @@ test-plans/
 auth-state.json
 auth-states/
 .chrome-profile/
-.sf-ui-recorder/
+.salesforce-ui-script-recorder/
 playback-results/
 .agents/
 docs/

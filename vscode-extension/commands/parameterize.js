@@ -12,7 +12,7 @@ const { getParamStatusLabel } = require('../step-labels');
 
 function register(context, codeLensProvider) {
   return vscode.commands.registerCommand(
-    'sf-ui-recorder.parameterizeStep',
+    'salesforce-ui-script-recorder.parameterizeStep',
     async (documentUri, stepIndex) => {
       const document = await vscode.workspace.openTextDocument(documentUri);
       let recording;
@@ -57,7 +57,7 @@ function register(context, codeLensProvider) {
         vscode.window.showInformationMessage('Salesforce UI Script Recorder: Parameterization removed.');
       }
 
-      await vscode.commands.executeCommand('sf-ui-recorder.reconvert', documentUri);
+      await vscode.commands.executeCommand('salesforce-ui-script-recorder.reconvert', documentUri);
     }
   );
 }

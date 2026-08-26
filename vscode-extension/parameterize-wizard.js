@@ -32,7 +32,7 @@ async function configVariableFlow(step) {
 
   const paramName = await vscode.window.showInputBox({
     title: 'Config Variable Name',
-    prompt: 'Enter the parameter name (will be read from SF_UI_RECORDER_<NAME> env var)',
+    prompt: 'Enter the parameter name (will be read from SALESFORCE_UI_SCRIPT_RECORDER_<NAME> env var)',
     value: suggestedName,
     validateInput: (value) => {
       if (!value || !value.trim()) return 'Parameter name is required';

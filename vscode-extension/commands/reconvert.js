@@ -14,7 +14,7 @@ const { resolveNodePath } = require('../resolve-node');
 
 function register(context) {
   return vscode.commands.registerCommand(
-    'sf-ui-recorder.reconvert',
+    'salesforce-ui-script-recorder.reconvert',
     async (documentUri) => {
       const uri = documentUri || vscode.window.activeTextEditor?.document.uri;
       if (!uri) {

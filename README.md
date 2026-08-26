@@ -246,20 +246,20 @@ When you click **Play Recording**, the Playback modal appears with input fields 
 - The password field is masked for security.
 - The Run button is disabled until all required fields are filled.
 
-> **Note:** If you run tests directly from the terminal (outside the extension), you'll need to set the environment variables manually. They follow the format `SF_UI_RECORDER_<PARAM_NAME>` (uppercased):
+> **Note:** If you run tests directly from the terminal (outside the extension), you'll need to set the environment variables manually. They follow the format `SALESFORCE_UI_SCRIPT_RECORDER_<PARAM_NAME>` (uppercased):
 >
 > ```bash
 > # macOS / Linux
-> export SF_UI_RECORDER_USERNAME="user@mail.com"
-> export SF_UI_RECORDER_PASSWORD="yourpassword"
+> export SALESFORCE_UI_SCRIPT_RECORDER_USERNAME="user@mail.com"
+> export SALESFORCE_UI_SCRIPT_RECORDER_PASSWORD="yourpassword"
 >
 > # Windows (PowerShell)
-> $env:SF_UI_RECORDER_USERNAME = "user@mail.com"
-> $env:SF_UI_RECORDER_PASSWORD = "yourpassword"
+> $env:SALESFORCE_UI_SCRIPT_RECORDER_USERNAME = "user@mail.com"
+> $env:SALESFORCE_UI_SCRIPT_RECORDER_PASSWORD = "yourpassword"
 >
 > # Windows (Command Prompt)
-> set SF_UI_RECORDER_USERNAME=user@mail.com
-> set SF_UI_RECORDER_PASSWORD=yourpassword
+> set SALESFORCE_UI_SCRIPT_RECORDER_USERNAME=user@mail.com
+> set SALESFORCE_UI_SCRIPT_RECORDER_PASSWORD=yourpassword
 > ```
 
 ---
@@ -299,7 +299,7 @@ Replace a recorded value with a dynamic variable — useful for making tests reu
 ![CodeLens parameterize actions on spec file](images/onboarding/codelens-spec.png)
 
 3. Click the CodeLens link and select an option:
-  - **Config Variable** — the value is read from an environment variable (`SF_UI_RECORDER_<NAME>`) at runtime. You'll be prompted to name the parameter.
+  - **Config Variable** — the value is read from an environment variable (`SALESFORCE_UI_SCRIPT_RECORDER_<NAME>`) at runtime. You'll be prompted to name the parameter.
   - **Remove Parameterization** — reverts the step back to its original recorded value.
 
 ![Parameterization mode picker](images/onboarding/parameterize-modal.png)
@@ -421,7 +421,7 @@ See all available recordings in your workspace.
 - "What recordings do I have?"
 - "List all my recorded tests"
 
-> **Note:** The MCP integration communicates with the VS Code extension via a file-based trigger mechanism (`.sf-ui-recorder/trigger.json`). Your editor must be open with the Salesforce UI Script Recorder extension active for Agentforce Vibes commands to work.
+> **Note:** The MCP integration communicates with the VS Code extension via a file-based trigger mechanism (`.salesforce-ui-script-recorder/trigger.json`). Your editor must be open with the Salesforce UI Script Recorder extension active for Agentforce Vibes commands to work.
 
 ---
 

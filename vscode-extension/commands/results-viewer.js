@@ -16,7 +16,7 @@ let panelState = null;
 
 function register(context) {
   const cmd = vscode.commands.registerCommand(
-    'sf-ui-recorder.viewResults',
+    'salesforce-ui-script-recorder.viewResults',
     // Optional arg: a spec name (string), a spec file Uri, or an options object
     // { specUri, inProgress } to open the panel with an active run.
     async (arg) => {
@@ -147,7 +147,7 @@ function groupRuns(runs) {
 function showResultsPanel(context, resultsDir, initialSpec, inProgress = null) {
   const extensionRoot = path.resolve(__dirname, '..', '..');
   const panel = vscode.window.createWebviewPanel(
-    'sfUiRecorderResults',
+    'salesforceUiScriptRecorderResults',
     'Playback Results',
     vscode.ViewColumn.Active,
     {
@@ -243,7 +243,7 @@ function showResultsPanel(context, resultsDir, initialSpec, inProgress = null) {
       return;
     }
     if (message.type === 'openFolder') {
-      vscode.commands.executeCommand('sf-ui-recorder.revealResultFolder', message.data);
+      vscode.commands.executeCommand('salesforce-ui-script-recorder.revealResultFolder', message.data);
     } else if (message.type === 'openFile') {
       const filePath = path.join(resultsDir, message.data);
       if (fs.existsSync(filePath)) {

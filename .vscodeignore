@@ -6,7 +6,7 @@
 .gitattributes
 .chrome-profile/**
 .agents/**
-.sf-ui-recorder/**
+.salesforce-ui-script-recorder/**
 recordings/**
 docs/**
 playback-results/**

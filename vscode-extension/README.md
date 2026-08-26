@@ -1,6 +1,6 @@
 # Salesforce UI Script Recorder — VS Code Extension
 
-A lightweight VS Code extension that wraps the `sf-ui-recorder` CLI, letting you record browser interactions and play back generated Playwright tests without leaving your editor.
+A lightweight VS Code extension that wraps the `salesforce-ui-script-recorder` CLI, letting you record browser interactions and play back generated Playwright tests without leaving your editor.
 
 ## Requirements
 
@@ -130,7 +130,7 @@ npx @vscode/vsce package
 |------|---------|---------|
 | 1 | `npm install` | Installs all dependencies (including `esbuild` as a dev dependency) |
 | 2 | `npm run build:injected` | Bundles `src/injected/entry.js` → `dist/injected-bundle.js` using esbuild |
-| 3 | `npx @vscode/vsce package` | Packages everything into `sf-ui-recorder-<version>.vsix` |
+| 3 | `npx @vscode/vsce package` | Packages everything into `salesforce-ui-script-recorder-<version>.vsix` |
 
 > **Note:** `npm run package` runs steps 2 and 3 together (via the `prepackage` lifecycle script), but `vsce` may require explicit invocation depending on your environment.
 
@@ -153,7 +153,7 @@ npx @vscode/vsce package
 ### Installing the built extension
 
 ```bash
-code --install-extension sf-ui-recorder-1.0.0.vsix
+code --install-extension salesforce-ui-script-recorder-1.0.0.vsix
 ```
 
 ### Cross-platform notes

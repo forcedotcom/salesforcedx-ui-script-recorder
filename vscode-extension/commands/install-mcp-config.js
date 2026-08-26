@@ -43,7 +43,7 @@ function getAgentforceMcpSettingsPath() {
 
 function register(context) {
   return vscode.commands.registerCommand(
-    'sf-ui-recorder.installAgentforceMcpConfig',
+    'salesforce-ui-script-recorder.installAgentforceMcpConfig',
     async () => {
       const settingsPath = getAgentforceMcpSettingsPath();
 
@@ -88,7 +88,7 @@ function register(context) {
           ...parsed,
           mcpServers: {
             ...existingMcpServers,
-            ['sf-ui-recorder']: mcpServerEntry,
+            ['salesforce-ui-script-recorder']: mcpServerEntry,
           },
         };
 
@@ -96,7 +96,7 @@ function register(context) {
 
         vscode.window
           .showInformationMessage(
-            'Salesforce UI Script Recorder: Installed Agentforce MCP config for sf-ui-recorder.',
+            'Salesforce UI Script Recorder: Installed Agentforce MCP config for salesforce-ui-script-recorder.',
             'Open File'
           )
           .then((selection) => {

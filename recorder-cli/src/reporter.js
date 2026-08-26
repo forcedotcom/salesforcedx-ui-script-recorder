@@ -58,9 +58,9 @@ class RecorderReporter {
 
   onEnd(result) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const batchId = process.env.SF_UI_RECORDER_BATCH_ID || null
-    const batchTimestamp = process.env.SF_UI_RECORDER_BATCH_TIMESTAMP || null
-    const sessionIndex = process.env.SF_UI_RECORDER_SESSION_INDEX || null
+    const batchId = process.env.SALESFORCE_UI_SCRIPT_RECORDER_BATCH_ID || null
+    const batchTimestamp = process.env.SALESFORCE_UI_SCRIPT_RECORDER_BATCH_TIMESTAMP || null
+    const sessionIndex = process.env.SALESFORCE_UI_SCRIPT_RECORDER_SESSION_INDEX || null
 
     const specFiles = [...new Set(this.results.map((r) => r.file))]
     const specName = specFiles.length === 1

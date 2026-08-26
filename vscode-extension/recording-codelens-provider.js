@@ -45,7 +45,7 @@ class RecordingCodeLensProvider {
     return [
       new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
         title: '$(refresh) Re-convert to Playwright',
-        command: 'sf-ui-recorder.reconvert',
+        command: 'salesforce-ui-script-recorder.reconvert',
         arguments: [document.uri],
       })
     ];
@@ -107,7 +107,7 @@ class RecordingCodeLensProvider {
             lenses.push(
               new vscode.CodeLens(range, {
                 title: `$(symbol-parameter) ${paramStatus}`,
-                command: 'sf-ui-recorder.parameterizeStep',
+                command: 'salesforce-ui-script-recorder.parameterizeStep',
                 arguments: [jsonUri, originalIndex],
               })
             );
@@ -116,7 +116,7 @@ class RecordingCodeLensProvider {
             lenses.push(
               new vscode.CodeLens(range, {
                 title: `$(add) Parameterize "${label}"`,
-                command: 'sf-ui-recorder.parameterizeStep',
+                command: 'salesforce-ui-script-recorder.parameterizeStep',
                 arguments: [jsonUri, originalIndex],
               })
             );
@@ -173,7 +173,7 @@ class RecordingCodeLensProvider {
 
     return new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
       title: '$(graph) View Playback Results',
-      command: 'sf-ui-recorder.viewResults',
+      command: 'salesforce-ui-script-recorder.viewResults',
       arguments: [document.uri],
     });
   }

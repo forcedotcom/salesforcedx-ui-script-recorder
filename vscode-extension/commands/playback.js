@@ -60,7 +60,7 @@ function specHasResults(workspacePath, specPath) {
 
 function register(context) {
   return vscode.commands.registerCommand(
-    'sf-ui-recorder.playbackScript',
+    'salesforce-ui-script-recorder.playbackScript',
     async () => {
       if (playbackInProgress) {
         vscode.window.showInformationMessage('Salesforce UI Script Recorder: A playback is already running. Please wait for it to finish before starting another.');
@@ -204,30 +204,30 @@ function register(context) {
         let pendingCount = count;
         for (let i = 0; i < count; i++) {
           const envVars = {
-            SF_UI_RECORDER_BATCH_ID: batchId,
-            SF_UI_RECORDER_BATCH_TIMESTAMP: batchTimestamp,
-            SF_UI_RECORDER_SESSION_INDEX: String(i + 1),
-            ...(headless && { SF_UI_RECORDER_HEADLESS: '1' }),
+            SALESFORCE_UI_SCRIPT_RECORDER_BATCH_ID: batchId,
+            SALESFORCE_UI_SCRIPT_RECORDER_BATCH_TIMESTAMP: batchTimestamp,
+            SALESFORCE_UI_SCRIPT_RECORDER_SESSION_INDEX: String(i + 1),
+            ...(headless && { SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS: '1' }),
           };
           const userRow = userRowCount > 0 ? userRows[i % userRowCount] : {};
           for (const [key, value] of Object.entries(userRow)) {
-            envVars[`SF_UI_RECORDER_${key.toUpperCase()}`] = value;
+            envVars[`SALESFORCE_UI_SCRIPT_RECORDER_${key.toUpperCase()}`] = value;
           }
           const dataRow = dataRowCount > 0 ? dataRows[i % dataRowCount] : {};
           for (const [key, value] of Object.entries(dataRow)) {
-            envVars[`SF_UI_RECORDER_${key.toUpperCase()}`] = value;
+            envVars[`SALESFORCE_UI_SCRIPT_RECORDER_${key.toUpperCase()}`] = value;
           }
 
           // Resolve auth state for this session's username
           const sessionUsername = userRow.username || userRow.email || userRow.user;
           const sessionAuthState = resolveAuthState(workspacePath, activeSpecPath, sessionUsername);
-          if (sessionAuthState) envVars.SF_UI_RECORDER_AUTH_STATE = sessionAuthState;
+          if (sessionAuthState) envVars.SALESFORCE_UI_SCRIPT_RECORDER_AUTH_STATE = sessionAuthState;
 
           // Each bulk session gets its own outputDir — Playwright wipes and
           // recreates the shared outputDir on every invocation, so sessions
           // launched concurrently against the same folder race on that
           // cleanup and can fail with ENOENT mid-run.
-          const sessionArgs = [...playwrightArgs, '--output', `.sf-ui-recorder/test-output/session-${i + 1}`];
+          const sessionArgs = [...playwrightArgs, '--output', `.salesforce-ui-script-recorder/test-output/session-${i + 1}`];
 
           runPlaybackTask(`Bulk #${i + 1}`, workspacePath, sessionArgs, envVars, () => {
             pendingCount--;
@@ -239,7 +239,7 @@ function register(context) {
         }
 
         // Open results viewer with in-progress state
-        vscode.commands.executeCommand('sf-ui-recorder.viewResults', {
+        vscode.commands.executeCommand('salesforce-ui-script-recorder.viewResults', {
           specUri: vscode.Uri.file(activeSpecPath),
           inProgress: {
             specName: specBaseName,
@@ -259,15 +259,15 @@ function register(context) {
 
         // Build env vars from parameter values
         const envVars = {};
-        if (headless) envVars.SF_UI_RECORDER_HEADLESS = '1';
+        if (headless) envVars.SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS = '1';
         for (const [paramName, value] of Object.entries(params)) {
-          envVars[`SF_UI_RECORDER_${paramName.toUpperCase()}`] = value;
+          envVars[`SALESFORCE_UI_SCRIPT_RECORDER_${paramName.toUpperCase()}`] = value;
         }
 
         // Resolve auth state for this spec + username
         const username = params.username || params.email || params.user;
         const authStatePath = resolveAuthState(workspacePath, activeSpecPath, username);
-        if (authStatePath) envVars.SF_UI_RECORDER_AUTH_STATE = authStatePath;
+        if (authStatePath) envVars.SALESFORCE_UI_SCRIPT_RECORDER_AUTH_STATE = authStatePath;
 
         const specBaseName = path.basename(activeSpecPath).replace(/\.spec\.js$/, '');
 
@@ -276,7 +276,7 @@ function register(context) {
           clearInProgress();
         });
 
-        vscode.commands.executeCommand('sf-ui-recorder.viewResults', {
+        vscode.commands.executeCommand('salesforce-ui-script-recorder.viewResults', {
           specUri: vscode.Uri.file(activeSpecPath),
           inProgress: {
             specName: specBaseName,
@@ -332,10 +332,10 @@ function runPlaybackTask(label, cwd, playwrightArgs, envVars, onDone) {
   });
 
   const task = new vscode.Task(
-    { type: 'sf-ui-recorder', task: label },
+    { type: 'salesforce-ui-script-recorder', task: label },
     vscode.TaskScope.Workspace,
     `Salesforce UI Script Recorder: ${label}`,
-    'sf-ui-recorder',
+    'salesforce-ui-script-recorder',
     execution,
     []
   );
@@ -414,7 +414,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
   return new Promise((resolve) => {
     const extensionRoot = path.resolve(__dirname, '..', '..');
     const panel = vscode.window.createWebviewPanel(
-      'sfUiRecorderPlayback',
+      'salesforceUiScriptRecorderPlayback',
       'Playback Options',
       vscode.ViewColumn.Active,
       {
@@ -554,7 +554,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         }
       } else if (message.type === 'openHistory') {
         // Open the Playback Results panel focused on this spec's runs.
-        vscode.commands.executeCommand('sf-ui-recorder.viewResults', vscode.Uri.file(specPath));
+        vscode.commands.executeCommand('salesforce-ui-script-recorder.viewResults', vscode.Uri.file(specPath));
       } else if (message.type === 'openFile') {
         const filePath = path.join(workspacePath, message.data);
         if (fs.existsSync(filePath)) {
@@ -563,7 +563,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
           });
         }
       } else if (message.type === 'revealFolder') {
-        vscode.commands.executeCommand('sf-ui-recorder.revealFileSection', message.data);
+        vscode.commands.executeCommand('salesforce-ui-script-recorder.revealFileSection', message.data);
       } else if (message.type === 'modeChange') {
         activeMode = message.data;
       } else if (message.type === 'dataSelectionChange') {
