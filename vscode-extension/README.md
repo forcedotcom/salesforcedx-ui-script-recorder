@@ -1,4 +1,4 @@
-# SF UI Recorder — VS Code Extension
+# Salesforce UI Script Recorder — VS Code Extension
 
 A lightweight VS Code extension that wraps the `sf-ui-recorder` CLI, letting you record browser interactions and play back generated Playwright tests without leaving your editor.
 
@@ -38,7 +38,7 @@ This downloads the correct platform-specific Playwright browser binary for your 
 
 ### Start UI Recording
 
-**Command Palette:** `SF UI Recorder: Start UI Recording`
+**Command Palette:** `Salesforce UI Script Recorder: Start UI Recording`
 
 1. Opens an input box prompting for a URL
 2. Launches a Chromium browser navigated to that URL
@@ -54,7 +54,7 @@ Recordings are saved to a `test-plans/playwright/` folder in your workspace:
 
 ### Play Recording
 
-**Command Palette:** `SF UI Recorder: Play Recording`
+**Command Palette:** `Salesforce UI Script Recorder: Play Recording`
 
 **Editor title bar:** Click the **play** button (appears on `.spec.js` files)
 
@@ -81,7 +81,6 @@ fresh-ui-recorder/
     icon.png                         Extension icon
     param-icon.svg                   Parameterize action icon
   test-plans/playwright/              Output directory for tests
-    config/config.js                 Config loader for test playback
   vscode-extension/
     extension.js                     Extension entry point (activates commands)
     package.json                     CommonJS type override for this directory
@@ -89,7 +88,6 @@ fresh-ui-recorder/
     recording-codelens-provider.js   CodeLens actions on recording files
     decorations.js                   Editor decorations for recordings
     step-labels.js                   Human-readable step label generation
-    config/config.js                 Runtime config for generated scripts
     utils/random.js                  Random utility for generated scripts
     commands/
       start-recording.js             Start recording command

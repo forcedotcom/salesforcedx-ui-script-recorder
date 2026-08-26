@@ -49,7 +49,7 @@ function register(context) {
 
       if (!settingsPath) {
         vscode.window.showErrorMessage(
-          'SF UI Recorder: Could not resolve Agentforce MCP settings path for this platform.'
+          'Salesforce UI Script Recorder: Could not resolve Agentforce MCP settings path for this platform.'
         );
         return;
       }
@@ -79,7 +79,7 @@ function register(context) {
             Array.isArray(existingMcpServers))
         ) {
           vscode.window.showErrorMessage(
-            'SF UI Recorder: Expected "mcpServers" to be an object in Agentforce MCP settings.'
+            'Salesforce UI Script Recorder: Expected "mcpServers" to be an object in Agentforce MCP settings.'
           );
           return;
         }
@@ -96,7 +96,7 @@ function register(context) {
 
         vscode.window
           .showInformationMessage(
-            'SF UI Recorder: Installed Agentforce MCP config for sf-ui-recorder.',
+            'Salesforce UI Script Recorder: Installed Agentforce MCP config for sf-ui-recorder.',
             'Open File'
           )
           .then((selection) => {
@@ -109,7 +109,7 @@ function register(context) {
           });
       } catch (error) {
         vscode.window.showErrorMessage(
-          `SF UI Recorder: Failed to install Agentforce MCP config: ${error}`
+          `Salesforce UI Script Recorder: Failed to install Agentforce MCP config: ${error}`
         );
       }
     }

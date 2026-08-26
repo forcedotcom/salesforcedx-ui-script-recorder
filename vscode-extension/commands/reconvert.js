@@ -18,7 +18,7 @@ function register(context) {
     async (documentUri) => {
       const uri = documentUri || vscode.window.activeTextEditor?.document.uri;
       if (!uri) {
-        vscode.window.showErrorMessage('SF UI Recorder: No recording file open.');
+        vscode.window.showErrorMessage('Salesforce UI Script Recorder: No recording file open.');
         return;
       }
 
@@ -28,7 +28,7 @@ function register(context) {
       }
 
       if (!jsonPath.endsWith('.json') || !fs.existsSync(jsonPath)) {
-        vscode.window.showErrorMessage('SF UI Recorder: No recording JSON found.');
+        vscode.window.showErrorMessage('Salesforce UI Script Recorder: No recording JSON found.');
         return;
       }
 
@@ -63,17 +63,17 @@ function register(context) {
             const doc = await vscode.workspace.openTextDocument(specPath);
             await vscode.window.showTextDocument(doc);
           }
-          vscode.window.showInformationMessage('SF UI Recorder: Playwright script regenerated.');
+          vscode.window.showInformationMessage('Salesforce UI Script Recorder: Playwright script regenerated.');
         } else {
           const details = stderr.trim() || stdout.trim() || `Exit code ${code}`;
-          const outputChannel = vscode.window.createOutputChannel('SF UI Recorder');
+          const outputChannel = vscode.window.createOutputChannel('Salesforce UI Script Recorder');
           outputChannel.appendLine(`[Convert] Failed with exit code ${code}`);
           outputChannel.appendLine(`[Convert] Node: ${nodePath}`);
           outputChannel.appendLine(`[Convert] Command: ${nodePath} ${cliPath} convert ${jsonPath}`);
           outputChannel.appendLine(`[Convert] stderr: ${stderr}`);
           outputChannel.appendLine(`[Convert] stdout: ${stdout}`);
           outputChannel.show(true);
-          vscode.window.showErrorMessage(`SF UI Recorder: Conversion failed — ${details}`, 'Show Output').then((choice) => {
+          vscode.window.showErrorMessage(`Salesforce UI Script Recorder: Conversion failed — ${details}`, 'Show Output').then((choice) => {
             if (choice === 'Show Output') outputChannel.show();
           });
         }
@@ -83,12 +83,12 @@ function register(context) {
         const hint = err.code === 'ENOENT'
           ? `Could not find Node.js at "${nodePath}". Ensure Node is installed and available on your PATH.`
           : err.message;
-        const outputChannel = vscode.window.createOutputChannel('SF UI Recorder');
+        const outputChannel = vscode.window.createOutputChannel('Salesforce UI Script Recorder');
         outputChannel.appendLine(`[Convert] Spawn error: ${err.message}`);
         outputChannel.appendLine(`[Convert] Error code: ${err.code || 'unknown'}`);
         outputChannel.appendLine(`[Convert] Node path attempted: ${nodePath}`);
         outputChannel.show(true);
-        vscode.window.showErrorMessage(`SF UI Recorder: ${hint}`, 'Show Output').then((choice) => {
+        vscode.window.showErrorMessage(`Salesforce UI Script Recorder: ${hint}`, 'Show Output').then((choice) => {
           if (choice === 'Show Output') outputChannel.show();
         });
       });

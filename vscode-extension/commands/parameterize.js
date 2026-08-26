@@ -19,13 +19,13 @@ function register(context, codeLensProvider) {
       try {
         recording = JSON.parse(document.getText());
       } catch {
-        vscode.window.showErrorMessage('SF UI Recorder: Could not parse recording JSON.');
+        vscode.window.showErrorMessage('Salesforce UI Script Recorder: Could not parse recording JSON.');
         return;
       }
 
       const step = recording.steps[stepIndex];
       if (!step) {
-        vscode.window.showErrorMessage('SF UI Recorder: Step not found.');
+        vscode.window.showErrorMessage('Salesforce UI Script Recorder: Step not found.');
         return;
       }
 
@@ -52,9 +52,9 @@ function register(context, codeLensProvider) {
 
       const status = getParamStatusLabel(recording.steps[stepIndex]);
       if (status) {
-        vscode.window.showInformationMessage(`SF UI Recorder: Step parameterized — ${status}`);
+        vscode.window.showInformationMessage(`Salesforce UI Script Recorder: Step parameterized — ${status}`);
       } else {
-        vscode.window.showInformationMessage('SF UI Recorder: Parameterization removed.');
+        vscode.window.showInformationMessage('Salesforce UI Script Recorder: Parameterization removed.');
       }
 
       await vscode.commands.executeCommand('sf-ui-recorder.reconvert', documentUri);

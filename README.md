@@ -1,4 +1,4 @@
-# SF UI Recorder
+# Salesforce UI Script Recorder
 
 Record and replay Salesforce UI interactions as Playwright tests directly from VS Code.
 
@@ -6,7 +6,7 @@ Record and replay Salesforce UI interactions as Playwright tests directly from V
 
 # Prerequisites
 
-Before using SF UI Recorder, ensure the following tools are installed on your machine.
+Before using Salesforce UI Script Recorder, ensure the following tools are installed on your machine.
 
 ## 1. Node.js (v18 or later)
 
@@ -77,7 +77,7 @@ You're all set! Proceed to the next section to install the extension.
 
 # Installing the Extension
 
-SF UI Recorder is not yet available for installation — we're working on publishing it to the VS Code Marketplace. Once published, you'll be able to install it directly from the Extensions panel. This README will be updated with installation instructions at that time.
+Salesforce UI Script Recorder is not yet available for installation — we're working on publishing it to the VS Code Marketplace. Once published, you'll be able to install it directly from the Extensions panel. This README will be updated with installation instructions at that time.
 
 ## Verify Installation
 
@@ -85,9 +85,9 @@ After installation, confirm the extension is active:
 
 1. Open the Activity Bar on the left side of VS Code — you should see a new **Salesforce UI Script Recorder** icon (cloud with a record dot).
 2. Click the icon to open the sidebar panel, which shows three sections: **Recordings**, **User Files**, and **Data Files**.
-3. Alternatively, open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **"SF UI Recorder"** to see the extension's commands.
+3. Alternatively, open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type **"Salesforce UI Script Recorder"** to see the extension's commands.
 
-![Command Palette showing SF UI Recorder commands](images/onboarding/verify-commands.png)
+![Command Palette showing Salesforce UI Script Recorder commands](images/onboarding/verify-commands.png)
 
 ---
 
@@ -139,7 +139,7 @@ This section is collapsed by default.
 
 Record browser interactions and automatically generate a Playwright test script.
 
-1. Click the **+** button in the Recordings section of the sidebar, or open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **"SF UI Recorder: Start UI Recording"**.
+1. Click the **+** button in the Recordings section of the sidebar, or open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **"Salesforce UI Script Recorder: Start UI Recording"**.
 2. Enter the URL you want to record against (e.g., your Salesforce org login page). Leave empty to default to `https://login.salesforce.com`. The extension auto-prepends `https://` if no protocol is provided.
 3. **If multiple saved accounts exist for this URL**, a picker appears asking which account's authentication state to load. Select an existing account to skip device verification, or choose "New session" to start fresh.
 4. A browser window will launch with an overlay control bar at the top of the page.
@@ -201,10 +201,6 @@ Runs the test once with one set of credentials and parameters.
 3. Click **Run**. The extension executes the test via Playwright in an integrated terminal.
 
 ![Playback modal — Single Run mode](images/onboarding/playback-single-run-mode.png)
-
-> **Note:** On first playback, the extension may prompt you to create a supporting config file (`config/config.js`). Accept the prompt to generate it automatically.
-
-![Config file creation prompt](images/onboarding/config-file-prompt.png)
 
 ---
 
@@ -339,7 +335,7 @@ Regenerate the `.spec.js` test file from the recording JSON. Useful after manual
 
 Set up the Model Context Protocol (MCP) integration for use with Agentforce AI tooling.
 
-1. Open the Command Palette and run **"SF UI Recorder: Install Agentforce MCP Server Config"**.
+1. Open the Command Palette and run **"Salesforce UI Script Recorder: Install Agentforce MCP Server Config"**.
 2. The extension writes the MCP server configuration to the appropriate platform-specific location:
   - **macOS:** `~/Library/Application Support/Code/User/globalStorage/salesforce.salesforcedx-einstein-gpt/settings/a4d_mcp_settings.json`
   - **Windows:** `%APPDATA%/Code/User/globalStorage/salesforce.salesforcedx-einstein-gpt/settings/a4d_mcp_settings.json`
@@ -388,7 +384,7 @@ npx playwright test --headed
 
 # Using with Agentforce Vibes
 
-If you prefer a conversational workflow, you can control SF UI Recorder through natural language prompts in Agentforce Vibes. After installing the MCP server config (see above), the following capabilities are available:
+If you prefer a conversational workflow, you can control Salesforce UI Script Recorder through natural language prompts in Agentforce Vibes. After installing the MCP server config (see above), the following capabilities are available:
 
 ## Record
 
@@ -425,7 +421,7 @@ See all available recordings in your workspace.
 - "What recordings do I have?"
 - "List all my recorded tests"
 
-> **Note:** The MCP integration communicates with the VS Code extension via a file-based trigger mechanism (`.sf-ui-recorder/trigger.json`). Your editor must be open with the SF UI Recorder extension active for Agentforce Vibes commands to work.
+> **Note:** The MCP integration communicates with the VS Code extension via a file-based trigger mechanism (`.sf-ui-recorder/trigger.json`). Your editor must be open with the Salesforce UI Script Recorder extension active for Agentforce Vibes commands to work.
 
 ---
 

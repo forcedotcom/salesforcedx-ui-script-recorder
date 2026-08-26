@@ -1,4 +1,4 @@
-# SF UI Recorder
+# Salesforce UI Script Recorder
 
 A CLI tool that records browser interactions and generates Playwright test scripts. Uses Chrome DevTools Protocol (CDP) isolated world injection to capture events accurately on Salesforce/LWC pages — bypassing shadow DOM retargeting and patched DOM APIs.
 
@@ -186,7 +186,6 @@ sf-ui-recorder/
 │   ├── recording-codelens-provider.js # CodeLens for recordings
 │   ├── decorations.js                # Editor decorations
 │   ├── step-labels.js                # Human-readable step labels
-│   ├── config/config.js              # Runtime config for generated scripts
 │   ├── utils/random.js               # Random utility for generated scripts
 │   ├── commands/                     # Command implementations
 │   │   ├── start-recording.js        # Start recording command
@@ -198,7 +197,6 @@ sf-ui-recorder/
 │   ├── icon.png                      # Extension icon
 │   └── param-icon.svg                # Parameterize action icon
 ├── test-plans/playwright/             # Output directory for tests
-│   └── config/config.js              # Config loader for test playback
 ├── playwright.config.js              # Playwright test runner config
 ├── .vscodeignore                     # Packaging exclusions for vsce
 └── package.json                      # Combined CLI + VS Code extension manifest

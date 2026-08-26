@@ -130,7 +130,7 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: 'SF UI Recorder',
+      title: 'Salesforce UI Script Recorder',
       cancellable: true,
     },
     (progress, token) => {
@@ -164,7 +164,7 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
             } catch {}
 
             vscode.window.showInformationMessage(
-              `SF UI Recorder: Recording saved with ${eventCount} events.`
+              `Salesforce UI Script Recorder: Recording saved with ${eventCount} events.`
             );
 
             // Open the spec file in the editor
@@ -235,11 +235,11 @@ async function handlePlayback(args, workspaceRoot, outputChannel, resultPath) {
 
   // Run in VS Code terminal so the user can see it
   let terminal = vscode.window.terminals.find(
-    (t) => t.name === 'SF UI Recorder: Playback'
+    (t) => t.name === 'Salesforce UI Script Recorder: Playback'
   );
   if (!terminal) {
     terminal = vscode.window.createTerminal({
-      name: 'SF UI Recorder: Playback',
+      name: 'Salesforce UI Script Recorder: Playback',
       cwd: workspaceRoot,
     });
   }
@@ -247,7 +247,7 @@ async function handlePlayback(args, workspaceRoot, outputChannel, resultPath) {
   terminal.sendText(terminalCommand);
 
   vscode.window.showInformationMessage(
-    `SF UI Recorder: Playback started for ${path.basename(specFile)}`
+    `Salesforce UI Script Recorder: Playback started for ${path.basename(specFile)}`
   );
 
   writeResult(resultPath, {
@@ -282,7 +282,7 @@ async function handleConvert(args, workspaceRoot, outputChannel, resultPath, con
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: 'SF UI Recorder',
+      title: 'Salesforce UI Script Recorder',
       cancellable: false,
     },
     (progress) => {
@@ -313,7 +313,7 @@ async function handleConvert(args, workspaceRoot, outputChannel, resultPath, con
           if (code === 0) {
             const specPath = args.output || inputFile.replace(/\.json$/, '.spec.js');
             vscode.window.showInformationMessage(
-              `SF UI Recorder: Converted to ${path.basename(specPath)}`
+              `Salesforce UI Script Recorder: Converted to ${path.basename(specPath)}`
             );
             writeResult(resultPath, { ok: true, specFile: specPath, output: stdout });
           } else {

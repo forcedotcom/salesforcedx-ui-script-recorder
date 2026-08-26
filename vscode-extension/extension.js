@@ -24,7 +24,7 @@ const decorations = require('./decorations');
 let outputChannel;
 
 function activate(context) {
-  outputChannel = vscode.window.createOutputChannel('SF UI Recorder');
+  outputChannel = vscode.window.createOutputChannel('Salesforce UI Script Recorder');
 
   // CodeLens provider for recording JSON and spec files
   const codeLensProvider = new RecordingCodeLensProvider();
@@ -58,6 +58,20 @@ function activate(context) {
   resultsWatcher.onDidCreate(() => { codeLensProvider.refresh(); recordingsTree.refresh(); });
   resultsWatcher.onDidDelete(() => { codeLensProvider.refresh(); recordingsTree.refresh(); });
   context.subscriptions.push(resultsWatcher);
+
+  // Refresh the User Files / Data Files sidebar views when their folders change
+  // on disk (e.g. files added outside the wizard, git pull, external edits).
+  const userFilesWatcher = vscode.workspace.createFileSystemWatcher('**/user-files/**');
+  userFilesWatcher.onDidCreate(() => userFilesTree.refresh());
+  userFilesWatcher.onDidDelete(() => userFilesTree.refresh());
+  userFilesWatcher.onDidChange(() => userFilesTree.refresh());
+  context.subscriptions.push(userFilesWatcher);
+
+  const dataFilesWatcher = vscode.workspace.createFileSystemWatcher('**/data-files/**');
+  dataFilesWatcher.onDidCreate(() => dataFilesTree.refresh());
+  dataFilesWatcher.onDidDelete(() => dataFilesTree.refresh());
+  dataFilesWatcher.onDidChange(() => dataFilesTree.refresh());
+  context.subscriptions.push(dataFilesWatcher);
 
   // Register commands
   context.subscriptions.push(
@@ -143,9 +157,9 @@ function activate(context) {
         for (const { from, to } of resultFolders) {
           fs.renameSync(from, to);
         }
-        vscode.window.showInformationMessage(`SF UI Recorder: Renamed to "${trimmedName}"`);
+        vscode.window.showInformationMessage(`Salesforce UI Script Recorder: Renamed to "${trimmedName}"`);
       } catch (e) {
-        vscode.window.showErrorMessage(`SF UI Recorder: Rename failed — ${e.message}`);
+        vscode.window.showErrorMessage(`Salesforce UI Script Recorder: Rename failed — ${e.message}`);
       }
     }),
     vscode.commands.registerCommand('sf-ui-recorder.deleteRecording', async (treeItem) => {
@@ -192,9 +206,9 @@ function activate(context) {
         for (const folderPath of resultFoldersToDelete) {
           fs.rmSync(folderPath, { recursive: true, force: true });
         }
-        vscode.window.showInformationMessage(`SF UI Recorder: Deleted "${baseName}"`);
+        vscode.window.showInformationMessage(`Salesforce UI Script Recorder: Deleted "${baseName}"`);
       } catch (e) {
-        vscode.window.showErrorMessage(`SF UI Recorder: Delete failed — ${e.message}`);
+        vscode.window.showErrorMessage(`Salesforce UI Script Recorder: Delete failed — ${e.message}`);
       }
     }),
     vscode.commands.registerCommand('sf-ui-recorder.revealResultFolder', async (resultFolderName) => {

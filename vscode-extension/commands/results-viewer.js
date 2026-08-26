@@ -22,7 +22,7 @@ function register(context) {
     async (arg) => {
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
-        vscode.window.showErrorMessage('SF UI Recorder: Please open a workspace folder first.');
+        vscode.window.showErrorMessage('Salesforce UI Script Recorder: Please open a workspace folder first.');
         return;
       }
 
@@ -251,14 +251,14 @@ function showResultsPanel(context, resultsDir, initialSpec, inProgress = null) {
           vscode.window.showTextDocument(doc, { preview: true });
         });
       } else {
-        vscode.window.showWarningMessage(`SF UI Recorder: File not found: ${message.data}`);
+        vscode.window.showWarningMessage(`Salesforce UI Script Recorder: File not found: ${message.data}`);
       }
     } else if (message.type === 'openImage') {
       const filePath = path.join(resultsDir, message.data);
       if (fs.existsSync(filePath)) {
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath), vscode.ViewColumn.Beside);
       } else {
-        vscode.window.showWarningMessage(`SF UI Recorder: Screenshot not found: ${message.data}`);
+        vscode.window.showWarningMessage(`Salesforce UI Script Recorder: Screenshot not found: ${message.data}`);
       }
     } else if (message.type === 'downloadHtml') {
       exportResultsHtml(resultsDir, activeSpec);
@@ -716,7 +716,7 @@ function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = 
 </head>
 <body>
   <div class="header">
-    <img src="${iconUri}" alt="SF UI Recorder" />
+    <img src="${iconUri}" alt="Salesforce UI Script Recorder" />
     <h2>Playback Results</h2>
     <button class="download-btn" id="download-btn" title="Download results as HTML report">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3"/><path d="M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2"/></svg>
@@ -1189,7 +1189,7 @@ async function exportResultsHtml(resultsDir, activeSpec) {
 
   if (uri) {
     fs.writeFileSync(uri.fsPath, html, 'utf-8');
-    vscode.window.showInformationMessage(`SF UI Recorder: Report saved to ${path.basename(uri.fsPath)}`);
+    vscode.window.showInformationMessage(`Salesforce UI Script Recorder: Report saved to ${path.basename(uri.fsPath)}`);
   }
 }
 

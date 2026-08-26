@@ -63,31 +63,30 @@ function register(context) {
     'sf-ui-recorder.playbackScript',
     async () => {
       if (playbackInProgress) {
-        vscode.window.showInformationMessage('SF UI Recorder: A playback is already running. Please wait for it to finish before starting another.');
+        vscode.window.showInformationMessage('Salesforce UI Script Recorder: A playback is already running. Please wait for it to finish before starting another.');
         return;
       }
 
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showErrorMessage('SF UI Recorder: No file open.');
+        vscode.window.showErrorMessage('Salesforce UI Script Recorder: No file open.');
         return;
       }
 
       const specPath = editor.document.uri.fsPath;
 
       if (!specPath.endsWith('.spec.js')) {
-        vscode.window.showErrorMessage('SF UI Recorder: This command only works on .spec.js files.');
+        vscode.window.showErrorMessage('Salesforce UI Script Recorder: This command only works on .spec.js files.');
         return;
       }
 
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
-        vscode.window.showErrorMessage('SF UI Recorder: Please open a workspace folder first.');
+        vscode.window.showErrorMessage('Salesforce UI Script Recorder: Please open a workspace folder first.');
         return;
       }
 
       ensurePlaywrightConfig(workspaceFolder.uri.fsPath, context.extensionPath);
-      await ensureUtilityFiles(specPath);
 
       // Parse spec file for config.get('...') parameters
       const specContent = fs.readFileSync(specPath, 'utf-8');
@@ -188,12 +187,12 @@ function register(context) {
 
         if (userRowCount > 0 && userRowCount < count) {
           vscode.window.showWarningMessage(
-            `SF UI Recorder: User file has ${userRowCount} row${userRowCount === 1 ? '' : 's'} but ${count} sessions requested — credentials will cycle.`
+            `Salesforce UI Script Recorder: User file has ${userRowCount} row${userRowCount === 1 ? '' : 's'} but ${count} sessions requested — credentials will cycle.`
           );
         }
         if (dataRowCount > 0 && dataRowCount < count) {
           vscode.window.showWarningMessage(
-            `SF UI Recorder: Data files have ${dataRowCount} row${dataRowCount === 1 ? '' : 's'} but ${count} sessions requested — data will cycle.`
+            `Salesforce UI Script Recorder: Data files have ${dataRowCount} row${dataRowCount === 1 ? '' : 's'} but ${count} sessions requested — data will cycle.`
           );
         }
 
@@ -224,7 +223,13 @@ function register(context) {
           const sessionAuthState = resolveAuthState(workspacePath, activeSpecPath, sessionUsername);
           if (sessionAuthState) envVars.SF_UI_RECORDER_AUTH_STATE = sessionAuthState;
 
-          runPlaybackTask(`Bulk #${i + 1}`, workspacePath, playwrightArgs, envVars, () => {
+          // Each bulk session gets its own outputDir — Playwright wipes and
+          // recreates the shared outputDir on every invocation, so sessions
+          // launched concurrently against the same folder race on that
+          // cleanup and can fail with ENOENT mid-run.
+          const sessionArgs = [...playwrightArgs, '--output', `.sf-ui-recorder/test-output/session-${i + 1}`];
+
+          runPlaybackTask(`Bulk #${i + 1}`, workspacePath, sessionArgs, envVars, () => {
             pendingCount--;
             if (pendingCount === 0) {
               playbackInProgress = false;
@@ -329,7 +334,7 @@ function runPlaybackTask(label, cwd, playwrightArgs, envVars, onDone) {
   const task = new vscode.Task(
     { type: 'sf-ui-recorder', task: label },
     vscode.TaskScope.Workspace,
-    `SF UI Recorder: ${label}`,
+    `Salesforce UI Script Recorder: ${label}`,
     'sf-ui-recorder',
     execution,
     []
@@ -569,7 +574,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         const filename = message.data?.filename || 'users.csv';
         const currentCredParams = bulkOptions.credentialParams || credentialParams;
         generateSkeletonCsv(workspacePath, 'user-files', filename, currentCredParams.length > 0 ? currentCredParams : ['username', 'password']);
-        vscode.window.showInformationMessage(`SF UI Recorder: Created user-files/${filename}`);
+        vscode.window.showInformationMessage(`Salesforce UI Script Recorder: Created user-files/${filename}`);
         vscode.workspace.openTextDocument(path.join(usersDir, filename)).then((doc) => {
           vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
         });
@@ -580,7 +585,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         const columns = message.data?.columns?.length > 0 ? message.data.columns : (currentDataParams.length > 0 ? currentDataParams : ['param1', 'param2']);
         const filename = message.data?.filename || 'data.csv';
         generateSkeletonCsv(workspacePath, 'data-files', filename, columns);
-        vscode.window.showInformationMessage(`SF UI Recorder: Created data-files/${filename}`);
+        vscode.window.showInformationMessage(`Salesforce UI Script Recorder: Created data-files/${filename}`);
         vscode.workspace.openTextDocument(path.join(dataDir, filename)).then((doc) => {
           vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
         });
@@ -1270,7 +1275,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 </head>
 <body>
   <div class="header">
-    <img src="${iconUri}" alt="SF UI Recorder" />
+    <img src="${iconUri}" alt="Salesforce UI Script Recorder" />
     <h2>Playback —
       <select id="recording-select" class="recording-select">
         ${availableRecordings.map((r) => `<option value="${escapeHtml(r)}"${r === specFileName.replace(/\.spec\.js$/, '') ? ' selected' : ''}>${escapeHtml(r)}</option>`).join('')}
@@ -1911,30 +1916,6 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-async function ensureUtilityFiles(specPath) {
-  const recordingsDir = path.dirname(specPath);
-  const configDir = path.join(recordingsDir, 'config');
-  const configPath = path.join(configDir, 'config.js');
-
-  if (fs.existsSync(configPath)) return;
-
-  const choice = await vscode.window.showWarningMessage(
-    'SF UI Recorder: The config file required by this script is missing.',
-    'Create File',
-    'Cancel'
-  );
-
-  if (choice !== 'Create File') return;
-
-  fs.mkdirSync(configDir, { recursive: true });
-  const sourceConfigPath = path.resolve(__dirname, '..', 'config', 'config.js');
-  fs.copyFileSync(sourceConfigPath, configPath);
-
-  vscode.window.showInformationMessage(
-    'SF UI Recorder: Created config/config.js in test-plans/playwright folder.'
-  );
 }
 
 module.exports = { register };

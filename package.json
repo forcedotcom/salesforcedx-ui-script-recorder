@@ -1,13 +1,13 @@
 {
   "name": "sf-ui-recorder",
-  "displayName": "SF UI Recorder",
-  "version": "1.3.0",
+  "displayName": "Salesforce UI Script Recorder",
+  "version": "1.4.0",
   "description": "VS Code Extension wrapping a CLI tool for recording Salesforce UI browser interactions with an overlay interface",
   "publisher": "salesforce",
   "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
-    "url": "git@github.com:forcedotcom/salesforcedx-ui-script-recorder.git"
+    "url": "https://github.com/forcedotcom/salesforcedx-ui-script-recorder.git"
   },
   "icon": "images/icon.png",
   "readme": "README.md",
@@ -60,83 +60,83 @@
       {
         "command": "sf-ui-recorder.startRecording",
         "title": "Start UI Recording",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(record)"
       },
       {
         "command": "sf-ui-recorder.playbackScript",
         "title": "Play Recording",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(play)"
       },
       {
         "command": "sf-ui-recorder.parameterizeStep",
         "title": "Parameterize Step",
-        "category": "SF UI Recorder"
+        "category": "Salesforce UI Script Recorder"
       },
       {
         "command": "sf-ui-recorder.reconvert",
         "title": "Re-convert to Playwright",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(refresh)"
       },
       {
         "command": "sf-ui-recorder.installAgentforceMcpConfig",
         "title": "Install Agentforce MCP Server Config",
-        "category": "SF UI Recorder"
+        "category": "Salesforce UI Script Recorder"
       },
       {
         "command": "sf-ui-recorder.viewResults",
         "title": "View Playback Results",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(graph)"
       },
       {
         "command": "sf-ui-recorder.viewRecordingHistory",
         "title": "View History",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(history)"
       },
       {
         "command": "sf-ui-recorder.playRecording",
         "title": "Play Recording",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(play)"
       },
       {
         "command": "sf-ui-recorder.renameRecording",
         "title": "Rename Recording",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(edit)"
       },
       {
         "command": "sf-ui-recorder.deleteRecording",
         "title": "Delete Recording",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(trash)"
       },
       {
         "command": "sf-ui-recorder.infoUserFiles",
         "title": "What are User Files?",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(info)"
       },
       {
         "command": "sf-ui-recorder.infoDataFiles",
         "title": "What are Data Files?",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(info)"
       },
       {
         "command": "sf-ui-recorder.revealUserFilesInExplorer",
         "title": "View in Explorer",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(folder-opened)"
       },
       {
         "command": "sf-ui-recorder.revealDataFilesInExplorer",
         "title": "View in Explorer",
-        "category": "SF UI Recorder",
+        "category": "Salesforce UI Script Recorder",
         "icon": "$(folder-opened)"
       }
     ],

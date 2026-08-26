@@ -46,7 +46,7 @@ program
       options.output = `./test-plans/playwright/recording_${timestamp}.json`
     }
 
-    console.log(chalk.blue.bold('\n🎬 SF UI Recorder\n'))
+    console.log(chalk.blue.bold('\n🎬 Salesforce UI Script Recorder\n'))
     console.log(chalk.gray(`  URL: ${options.url}`))
     console.log(chalk.gray(`  Output: ${options.output}`))
     console.log(chalk.gray(`  Browser: ${options.browser}\n`))
@@ -68,7 +68,7 @@ program
   .option('--user <user>', 'Username', '')
   .option('--team <team>', 'Team name', '')
   .action(async (input, options) => {
-    console.log(chalk.blue.bold('\n🎬 SF UI Recorder — Convert\n'))
+    console.log(chalk.blue.bold('\n🎬 Salesforce UI Script Recorder — Convert\n'))
 
     const inputPath = path.resolve(input)
     if (!fs.existsSync(inputPath)) {

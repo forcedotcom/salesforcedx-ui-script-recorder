@@ -39,7 +39,7 @@ function register(context, outputChannel) {
 
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
-        vscode.window.showErrorMessage('SF UI Recorder: Please open a workspace folder first.');
+        vscode.window.showErrorMessage('Salesforce UI Script Recorder: Please open a workspace folder first.');
         return;
       }
 
@@ -51,7 +51,7 @@ function register(context, outputChannel) {
       // Ensure playwright.config.js exists in the workspace
       const { created } = ensurePlaywrightConfig(workspaceFolder.uri.fsPath, context.extensionPath);
       if (created) {
-        outputChannel.appendLine('[SF UI Recorder] Created playwright.config.js in workspace');
+        outputChannel.appendLine('[Salesforce UI Script Recorder] Created playwright.config.js in workspace');
       }
 
       const timestamp = new Date()
@@ -93,7 +93,7 @@ function register(context, outputChannel) {
       vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: 'SF UI Recorder',
+          title: 'Salesforce UI Script Recorder',
           cancellable: true,
         },
         (progress, token) => {
@@ -132,7 +132,7 @@ function register(context, outputChannel) {
                 } catch {}
 
                 vscode.window.showInformationMessage(
-                  `SF UI Recorder: Recording successfully saved with ${eventCount} events.`
+                  `Salesforce UI Script Recorder: Recording successfully saved with ${eventCount} events.`
                 );
 
                 const specPath = outputPath.replace(/\.json$/, '.spec.js');
@@ -149,7 +149,7 @@ function register(context, outputChannel) {
                 const description = codeDescriptions[String(code)] || 'An unexpected error occurred.';
                 outputChannel.appendLine(`\n[Exit code ${code}]: ${description}`);
                 vscode.window.showErrorMessage(
-                  `SF UI Recorder: Recording stopped — ${description}`,
+                  `Salesforce UI Script Recorder: Recording stopped — ${description}`,
                   'Show Output'
                 ).then((choice) => {
                   if (choice === 'Show Output') outputChannel.show();
@@ -166,7 +166,7 @@ function register(context, outputChannel) {
               outputChannel.appendLine(`[Error] Code: ${err.code || 'unknown'}`);
               outputChannel.appendLine(`[Error] Node path: ${nodePath}`);
               vscode.window.showErrorMessage(
-                `SF UI Recorder: ${hint}`,
+                `Salesforce UI Script Recorder: ${hint}`,
                 'Show Output'
               ).then((choice) => {
                 if (choice === 'Show Output') outputChannel.show();

@@ -9,7 +9,7 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
 */
 
 /**
- * MCP Server for SF UI Recorder
+ * MCP Server for Salesforce UI Script Recorder
  *
  * Communicates with the VS Code extension via file-based triggers:
  *   1. Writes a command to <workspace>/.sf-ui-recorder/trigger.json
@@ -253,7 +253,7 @@ function waitForResult() {
       if (Date.now() - startTime > RESULT_TIMEOUT_MS) {
         reject(new Error(
           'Timed out waiting for VS Code extension to respond. ' +
-          'Make sure the SF UI Recorder extension is active in VS Code and a workspace folder is open.'
+          'Make sure the Salesforce UI Script Recorder extension is active in VS Code and a workspace folder is open.'
         ))
         return
       }
@@ -270,7 +270,7 @@ function waitForResult() {
 async function main() {
   const transport = new StdioServerTransport()
   await server.connect(transport)
-  console.error(`SF UI Recorder MCP server running on stdio (workspace: ${WORKSPACE_ROOT})`)
+  console.error(`Salesforce UI Script Recorder MCP server running on stdio (workspace: ${WORKSPACE_ROOT})`)
 }
 
 main().catch((err) => {

@@ -1,10 +1,15 @@
 .vscode/**
 .cursor/**
+.claude/**
 .git/**
 .gitignore
 .gitattributes
 .chrome-profile/**
 .agents/**
+.sf-ui-recorder/**
+recordings/**
+docs/**
+playback-results/**
 test-plans/**
 test-results/**
 recorder-cli/scripts/**
