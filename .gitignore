@@ -15,3 +15,5 @@ recordings/
 test-results/
 *.vsix
 *.vsix.zip
+coverage/
+.tmp-cli-org-verify/

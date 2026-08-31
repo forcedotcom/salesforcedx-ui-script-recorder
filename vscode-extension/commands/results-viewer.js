@@ -83,6 +83,8 @@ function specNameFromArg(arg) {
 // A run folder is named "<specName>---<timestamp>" (single),
 // or bulk runs live under "<specName>---<timestamp>---BULK/session-<n>".
 // Legacy flat naming "<specName>---batch-<id>---session-<n>" is also supported.
+// Every run object passed here comes from loadAllRuns, which always sets
+// _dirName before pushing it - the "|| ''" fallback has no reachable false case.
 function runSpecName(run) {
   return (run._dirName || '').split('---')[0];
 }
@@ -113,6 +115,8 @@ function loadAllRuns(resultsDir) {
     }
   }
 
+  // Both a and b are entries this same loop just pushed with _dirName set,
+  // so the "|| ''" fallbacks here have no reachable false case.
   runs.sort((a, b) => (a._dirName || '').localeCompare(b._dirName || ''));
   return runs;
 }
@@ -144,6 +148,9 @@ function groupRuns(runs) {
   return groups;
 }
 
+// showResultsPanel has exactly one call site (register's command handler),
+// which always passes an explicit 4th argument (an object or literal null) -
+// so this default can never actually be exercised.
 function showResultsPanel(context, resultsDir, initialSpec, inProgress = null) {
   const extensionRoot = path.resolve(__dirname, '..', '..');
   const panel = vscode.window.createWebviewPanel(
@@ -266,6 +273,9 @@ function showResultsPanel(context, resultsDir, initialSpec, inProgress = null) {
   });
 }
 
+// getResultsHtml has exactly one call site (renderPanel, inside
+// showResultsPanel), which always passes all seven arguments explicitly -
+// so none of these defaults can ever actually be exercised.
 function getResultsHtml(groups, iconUri, resultsBaseUri, cspSource, specNames = [], activeSpec = null, inProgress = []) {
   const reversedGroups = [...groups].reverse();
 
@@ -820,6 +830,8 @@ function renderBatchGroup(group, resultsBaseUri, startOpen) {
   const totalSessions = runs.length;
   const passedSessions = runs.filter((r) => r.status === 'passed').length;
   const failedSessions = totalSessions - passedSessions;
+  // groupRuns only ever creates a group from at least one run, so totalSessions
+  // is always >= 1 - the ": 0" fallback has no reachable case.
   const passRate = totalSessions > 0 ? Math.round((passedSessions / totalSessions) * 100) : 0;
   const overallStatus = passedSessions === totalSessions ? 'pass' : 'fail';
   const date = formatDate(runs[0].timestamp);
@@ -930,6 +942,10 @@ function renderErrors(run) {
 }
 
 // Renders screenshot thumbnails for every test in a run (used for bulk sessions).
+// This has one call site, in renderBatchGroup, where renderErrors and
+// renderStdout already run first on the same run and both dereference
+// run.tests unconditionally - so a missing run.tests would throw there
+// before this guard could ever see it. Kept only for defense in depth.
 function renderRunScreenshots(run, dirName, resultsBaseUri) {
   if (!run.tests) return '';
   return run.tests.map((test) => renderTestScreenshots(test, dirName, resultsBaseUri)).join('');
@@ -994,6 +1010,9 @@ function renderTestErrors(test) {
 // Playwright for error messages, code frames, and stacks) into safe HTML with
 // colored <span> runs. HTML is escaped first, so the result is injection-safe.
 // Only the SGR subset Playwright uses is handled; unknown codes are ignored.
+// All three call sites (the error message, and the stack/snippet <pre>
+// blocks gated by hasStack/hasSnippet) only ever pass an already-truthy
+// string - this guard has no reachable case to test.
 function ansiToHtml(input) {
   if (!input) return '';
 
@@ -1274,6 +1293,9 @@ function renderExportErrors(run) {
   }).join('');
 }
 
+// Same reasoning as renderRunScreenshots above: both call sites run
+// renderExportErrors first on the same run, which dereferences run.tests
+// unconditionally - so a missing run.tests would throw there first.
 function renderExportScreenshots(run, resultsDir) {
   if (!run.tests) return '';
   const images = [];
@@ -1299,6 +1321,8 @@ function renderExportScreenshots(run, resultsDir) {
   return `<div class="shots">${images.join('')}</div>`;
 }
 
+// Same reasoning as ansiToHtml above: every call site here only ever passes
+// an already-truthy string, so this guard has no reachable case to test.
 function stripAnsi(str) {
   if (!str) return '';
   // eslint-disable-next-line no-control-regex

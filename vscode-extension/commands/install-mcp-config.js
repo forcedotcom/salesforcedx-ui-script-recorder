@@ -47,6 +47,9 @@ function register(context) {
     async () => {
       const settingsPath = getAgentforceMcpSettingsPath();
 
+      // getAgentforceMcpSettingsPath always path.joins several non-empty literal
+      // segments onto baseDir, so the result is never falsy on any platform/env
+      // combination - this guard has no reachable false case to test.
       if (!settingsPath) {
         vscode.window.showErrorMessage(
           'Salesforce UI Script Recorder: Could not resolve Agentforce MCP settings path for this platform.'

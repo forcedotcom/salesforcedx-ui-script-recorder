@@ -251,7 +251,11 @@
     "mcp": "node mcp-server/index.js",
     "build:injected": "node recorder-cli/scripts/build-injected.js",
     "prepackage": "npm run build:injected",
-    "package": "vsce package"
+    "package": "vsce package",
+    "test": "jest",
+    "test:recorder-cli": "jest --selectProjects recorder-cli",
+    "test:vscode-extension": "jest --selectProjects vscode-extension",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -264,7 +268,13 @@
     "ws": "^8.17.0"
   },
   "devDependencies": {
+    "@babel/core": "^8.0.1",
+    "@babel/preset-env": "^8.0.2",
     "@types/vscode": "^1.85.0",
-    "esbuild": "^0.21.0"
+    "babel-jest": "^30.4.1",
+    "babel-plugin-transform-import-meta": "^3.0.0",
+    "esbuild": "^0.21.0",
+    "jest": "^30.4.2",
+    "jest-environment-jsdom": "^30.4.1"
   }
 }

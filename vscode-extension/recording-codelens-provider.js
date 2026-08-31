@@ -179,6 +179,9 @@ class RecordingCodeLensProvider {
   }
 }
 
+// Dead code: not called anywhere in this file, not exported (module.exports
+// only exposes RecordingCodeLensProvider below), and nothing else in the
+// extension imports it - there is no reachable path to exercise it.
 function findStepPositions(text, steps) {
   const lines = text.split('\n');
   const positions = new Array(steps.length).fill(-1);

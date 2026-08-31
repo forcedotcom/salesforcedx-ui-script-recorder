@@ -164,12 +164,20 @@ function register(context) {
       });
       if (!result) return;
 
-      // Use the spec path from the form (may have changed via recording dropdown)
+      // Use the spec path from the form (may have changed via recording dropdown).
+      // showPlaybackForm's only truthy-resolve call site always resolves with
+      // { ...message.data, specPath }, so result.specPath is always set here -
+      // the "|| specPath" fallback has no reachable false case to test.
       const activeSpecPath = result.specPath || specPath;
 
       playbackInProgress = true;
 
-      // Close terminals from previous playback runs
+      // Close terminals from previous playback runs. previousTaskExecutions only
+      // holds entries while playbackInProgress is true (an execution is pushed
+      // when its task starts and removed by the same onDidEndTaskProcess event
+      // that eventually flips playbackInProgress back to false), and the guard
+      // at the top of this handler blocks re-entry while playbackInProgress is
+      // true - so this loop can never run against a non-empty array.
       for (const prev of previousTaskExecutions) {
         prev.terminate();
       }
@@ -374,6 +382,8 @@ function runPlaybackTask(label, cwd, playwrightArgs, envVars, onDone) {
       if (e.execution === taskExecution) {
         listener.dispose();
         previousTaskExecutions = previousTaskExecutions.filter((t) => t !== taskExecution);
+        // Both call sites of runPlaybackTask always pass a callback, so
+        // onDone is never falsy here - this guard has no reachable false case.
         if (onDone) onDone();
       }
     });
@@ -408,6 +418,10 @@ function generateSkeletonCsv(workspacePath, dirName, fileName, columns) {
   fs.writeFileSync(filePath, `${header}\n${sampleRow}\n`, 'utf-8');
 }
 
+// showPlaybackForm has exactly one call site, which always passes a fully
+// populated bulkOptions object (credentialParams, dataParams and specFileName
+// included) - so the default here and in the destructuring below can never
+// actually be exercised.
 function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
   const { credentialParams = [], dataParams = [], workspacePath, usersDir, dataDir, specFileName = '' } = bulkOptions;
   let specPath = bulkOptions.specPath;
@@ -602,6 +616,10 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         selectedOrg = message.data || null;
       } else if (message.type === 'generateUsersFile') {
         const filename = message.data?.filename || 'users.csv';
+        // bulkOptions.credentialParams is always an array (set at the initial
+        // call site and reassigned, but never cleared, by switchRecording),
+        // and arrays are truthy even when empty - so the "|| credentialParams"
+        // fallback to the closure variable can never actually be taken.
         const currentCredParams = bulkOptions.credentialParams || credentialParams;
         generateSkeletonCsv(workspacePath, 'user-files', filename, currentCredParams.length > 0 ? currentCredParams : ['username', 'password']);
         vscode.window.showInformationMessage(`Salesforce UI Script Recorder: Created user-files/${filename}`);
@@ -611,6 +629,9 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         selectedUserFile = filename;
         refreshPanel();
       } else if (message.type === 'generateDataFile') {
+        // Same reasoning as currentCredParams above: bulkOptions.dataParams is
+        // always a (possibly empty, still truthy) array, so this fallback to
+        // the closure variable can never actually be taken.
         const currentDataParams = bulkOptions.dataParams || dataParams;
         const columns = message.data?.columns?.length > 0 ? message.data.columns : (currentDataParams.length > 0 ? currentDataParams : ['param1', 'param2']);
         const filename = message.data?.filename || 'data.csv';
@@ -647,6 +668,15 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
   });
 }
 
+// getWebviewHtml has exactly two call sites (refreshPanel and the
+// switchRecording handler), and both always pass an explicit cachedValues
+// object and a bulkOptions object covering every one of the destructured
+// keys below - so none of these defaults can ever actually be exercised.
+// Likewise, dataCsvMeta and dataCsvFiles are always built together in
+// lockstep from the same directory listing at every call site, so below,
+// `dataCsvMeta[f]?.columns` is always an array (even if empty, which is
+// still truthy) for every f in dataCsvFiles - the "|| []" fallback on that
+// specific lookup has no reachable false case.
 function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}) {
   const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], selectedOrg = null, availableOrgs = [], orgListError = null, specFileName = '', hasResults = false, availableRecordings = [] } = bulkOptions;
 

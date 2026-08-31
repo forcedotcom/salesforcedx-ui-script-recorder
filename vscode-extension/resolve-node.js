@@ -56,4 +56,4 @@ function getExtendedPath() {
   return [...extras, currentPath].join(':');
 }
 
-module.exports = { resolveNodePath };
+module.exports = { resolveNodePath, getExtendedPath };
