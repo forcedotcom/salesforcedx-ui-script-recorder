@@ -10,6 +10,7 @@ import { chromium } from 'playwright'
 import { createServer } from './server.js'
 import { buildInjectedScript } from './build.js'
 import { convertToPlaywright } from './playwright-converter.js'
+import { getFrontdoorUrl, sanitizeFrontdoor } from './sf-cli.js'
 import { execFileSync } from 'child_process'
 import { createRequire } from 'module'
 import chalk from 'chalk'
@@ -29,7 +30,8 @@ export async function startRecording(options) {
     viewportHeight,
     profileDir,
     saveAuth,
-    loadAuth
+    loadAuth,
+    org
   } = options
 
   // Build the injected script bundle
@@ -45,8 +47,8 @@ export async function startRecording(options) {
 
   // Ensure Chromium is installed using the bundled Playwright CLI
   // (must match the exact playwright version in our node_modules)
-  const require = createRequire(import.meta.url)
-  const playwrightPkgDir = path.dirname(require.resolve('playwright/package.json'))
+  const nodeRequire = createRequire(import.meta.url)
+  const playwrightPkgDir = path.dirname(nodeRequire.resolve('playwright/package.json'))
   const playwrightCliPath = path.join(playwrightPkgDir, 'cli.js')
   const chromiumPath = browserType.executablePath()
 
@@ -338,7 +340,7 @@ export async function startRecording(options) {
     // but Salesforce skips the identity verification screen.
     if (saveAuth) {
       try {
-        const authPath = resolveAuthStatePath(saveAuth, recording, url)
+        const authPath = resolveAuthStatePath(saveAuth, recording, recordedUrl)
         fs.mkdirSync(path.dirname(authPath), { recursive: true })
         const fullState = await context.storageState()
         const deviceState = stripSessionCookies(fullState)
@@ -376,7 +378,7 @@ export async function startRecording(options) {
       // Try to save device-identity cookies before context is fully destroyed
       if (saveAuth) {
         try {
-          const authPath = resolveAuthStatePath(saveAuth, recording, url)
+          const authPath = resolveAuthStatePath(saveAuth, recording, recordedUrl)
           fs.mkdirSync(path.dirname(authPath), { recursive: true })
           const fullState = await context.storageState()
           const deviceState = stripSessionCookies(fullState)
@@ -419,19 +421,44 @@ export async function startRecording(options) {
     context.on('close', onBrowserClose)
   }
 
+  // Resolve where to navigate. With --org, log in via the Salesforce CLI's
+  // org session instead of the login form — no credentials or MFA prompt,
+  // since the CLI already holds a valid OAuth token for that org. The
+  // frontdoor URL carries a live session token (sid), so it's used only
+  // for the actual page.goto() — the recording (and every log line) gets
+  // the sanitized destination instead, never the token.
+  let navigationUrl = url
+  let recordedUrl = url
+  if (org) {
+    console.log(chalk.gray(`  Logging in via Salesforce CLI org: ${org}...`))
+    let orgPath
+    if (url && url !== 'about:blank') {
+      try {
+        const parsedUrl = new URL(url)
+        orgPath = parsedUrl.pathname + parsedUrl.search + parsedUrl.hash
+      } catch {
+        orgPath = url // not a full URL — treat as a bare path
+      }
+    }
+    const frontdoorUrl = await getFrontdoorUrl(org, orgPath ? { path: orgPath } : {})
+    navigationUrl = frontdoorUrl
+    recordedUrl = sanitizeFrontdoor(frontdoorUrl)
+    console.log(chalk.green(`  ✓ Logged in as ${org} (no password or MFA prompt needed)`))
+  }
+
   // Navigate to the starting URL
-  if (url && url !== 'about:blank') {
+  if (navigationUrl && navigationUrl !== 'about:blank') {
     // Pre-record the GOTO before navigation triggers the injected script
     recording.push({
       selector: undefined,
       title: '',
       action: 'GOTO',
-      href: url,
+      href: recordedUrl,
       eventTime: Date.now()
     })
     hasGoto = true
 
-    await page.goto(url)
+    await page.goto(navigationUrl)
 
     // Update the title now that the page has loaded
     const title = await page.title()

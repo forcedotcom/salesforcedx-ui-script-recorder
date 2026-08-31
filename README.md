@@ -62,6 +62,15 @@ Playwright requires browser binaries to run tests. Install Chromium (the default
 npx playwright install chromium
 ```
 
+## 4. Salesforce CLI (optional, recommended)
+
+Installing the [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) (`sf`) lets you record and play back against an org you're already logged into — no username, password, or MFA code typed into the recorder, ever. See [Log In via Salesforce CLI](#log-in-via-salesforce-cli-no-credentials-no-mfa) below.
+
+```bash
+npm install --global @salesforce/cli
+sf org login web   # authenticates a browser-based login once; the recorder reuses that session
+```
+
 ## Verify Your Setup
 
 After completing the steps above, confirm everything is working:
@@ -140,9 +149,11 @@ This section is collapsed by default.
 Record browser interactions and automatically generate a Playwright test script.
 
 1. Click the **+** button in the Recordings section of the sidebar, or open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **"Salesforce UI Script Recorder: Start UI Recording"**.
-2. Enter the URL you want to record against (e.g., your Salesforce org login page). Leave empty to default to `https://login.salesforce.com`. The extension auto-prepends `https://` if no protocol is provided.
-3. **If multiple saved accounts exist for this URL**, a picker appears asking which account's authentication state to load. Select an existing account to skip device verification, or choose "New session" to start fresh.
-4. A browser window will launch with an overlay control bar at the top of the page.
+2. Choose how to log in:
+   - **Log in with a Salesforce CLI org** — pick from orgs you've already authenticated via `sf org login web`. No password or MFA prompt; see [Log In via Salesforce CLI](#log-in-via-salesforce-cli-no-credentials-no-mfa). You'll also be asked for an optional landing path (e.g. `/lightning/o/Account/list`) — leave it empty to start on the org home page.
+   - **Enter a URL manually** — the classic flow. Enter the URL you want to record against (e.g., your Salesforce org login page). Leave empty to default to `https://login.salesforce.com`. The extension auto-prepends `https://` if no protocol is provided.
+3. **If you entered a URL manually and multiple saved accounts exist for it**, a picker appears asking which account's authentication state to load. Select an existing account to skip device verification, or choose "New session" to start fresh.
+4. A browser window will launch with an overlay control bar at the top of the page, already logged in if you chose a CLI org.
 
 ![Browser overlay during recording](images/onboarding/record-overlay-bar.png)
 
@@ -186,6 +197,7 @@ You can also close the browser window to stop recording — the output files wil
 Click the **▶ Play** button on a recording in the sidebar, or open a `.spec.js` file and click the **Play** icon (▶) in the editor title bar. This opens the **Playback modal**, shared by both run modes below:
 
 - **Recording selector** — Dropdown in the header to switch between recordings without closing the modal.
+- **Salesforce CLI org selector** — Optional. Pick an org you've authenticated via `sf org login web` to skip the login form and any credential fields entirely — no password or MFA needed. Leave it on "None" to use the credential/data fields below as before. See [Log In via Salesforce CLI](#log-in-via-salesforce-cli-no-credentials-no-mfa).
 - **Mode toggle** — Switch between **▶ Single Run** and **☰ Bulk / Parallel**.
 - **Headed/Headless toggle** — Controls whether the browser is visible during the run. **Single Run defaults to headed**; **Bulk defaults to headless** (so spawning many sessions doesn't open dozens of windows). Switching modes resets the toggle to that mode's default, but you can flip it either way before clicking Run.
 - **Spec file / History badges** — Clickable shortcuts to open the spec file, or the results viewer (History only appears once the recording has been played back).
@@ -344,6 +356,34 @@ Set up the Model Context Protocol (MCP) integration for use with Agentforce AI t
 
 ---
 
+## Log In via Salesforce CLI (No Credentials, No MFA)
+
+Typing a username and password into the recorder breaks down for most real orgs — 2FA, SSO, and IP restrictions make headless credential login fragile or impossible, and storing passwords in CSVs/env vars is a security liability. If you're already logged into an org via the [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) (`sf`), the recorder and playback can reuse that session directly instead: no password is entered, no MFA prompt appears, and no credential is ever written to disk.
+
+### How it works
+
+`sf` holds an OAuth token for every org you've authenticated with `sf org login web`. `sf org open -o <org> --url-only` turns that token into a one-time "frontdoor" login URL — navigating a browser there logs it straight into the org, fully authenticated. The recorder and generated tests use this instead of driving the login form:
+
+- **Recording** — choosing "Log in with a Salesforce CLI org" resolves a frontdoor URL once at launch and opens the browser already logged in. The recorded steps store the plain org URL you land on (e.g. `https://myorg.my.salesforce.com/lightning/o/Account/list`) — the login token itself is never written to the recording JSON or the generated `.spec.js`.
+- **Playback** — the generated test resolves its own **fresh** frontdoor URL from the CLI every time it runs, right before your recorded steps. Nothing is cached or shared between runs, so playback never goes stale as long as the CLI's org token is valid (which `sf` auto-refreshes).
+- **Bulk / parallel playback** — all sessions log into the **same selected org**, but each of the N spawned Playwright processes resolves its own independent frontdoor URL. This is more robust than a shared cookie file — sessions can't race each other during login.
+
+### Prerequisites
+
+```bash
+npm install --global @salesforce/cli
+sf org login web        # opens a browser to authenticate; completes any MFA/SSO challenge once
+sf org login web --alias my-sandbox   # repeat per additional org, with an optional alias
+```
+
+Once authenticated, the org stays available to the recorder until you `sf org logout` or the CLI's OAuth token is revoked — no need to log in again per recording or playback session.
+
+### Security notes
+
+- The frontdoor URL contains a live session token (`sid`). It's used only in memory to navigate the browser — it is never printed to the VS Code output channel, never written to the recording JSON or `.spec.js`, and never saved under `playback-results/`.
+- Running from the terminal instead of the extension? Use `--org <usernameOrAlias>` on `record`, and set `SALESFORCE_UI_SCRIPT_RECORDER_ORG=<usernameOrAlias>` before `npx playwright test` for playback. See [`recorder-cli/README.md`](recorder-cli/README.md) for CLI-only usage.
+- This is additive: the existing URL/credential flow and the auth-state cookie persistence described below both keep working unchanged for orgs or workflows that don't go through the Salesforce CLI.
+
 ## Multi-Account Session Persistence (Skipping MFA)
 
 For Salesforce orgs with MFA, the extension automatically persists authenticated sessions for multiple accounts so that:
@@ -428,7 +468,7 @@ See all available recordings in your workspace.
 # Known Limitations
 
 - **Hover interactions are not captured.** UI elements that only appear on hover (e.g., tooltips, dropdown menus triggered by mouseover) will not be recorded. Tests that depend on these elements will fail during playback. Hover event support is not yet available.
-- **MFA requires manual verification on first recording per account.** During your first recording session for a given account, you will need to manually complete the MFA challenge. On subsequent recordings and playbacks with that account, MFA should be bypassed automatically — the extension saves device identity cookies in `auth-states/<hostname>---<username>.json` for reuse. The auth state is continuously updated after each successful login, so the cookie should stay fresh. If issues arise, you may need to manually enter the MFA code again during recording and/or playback.
+- **MFA requires manual verification on first recording per account** — unless you use [Log In via Salesforce CLI](#log-in-via-salesforce-cli-no-credentials-no-mfa), which skips the login form (and MFA) entirely for orgs you've already authenticated with `sf org login web`. With the credential-based flow, during your first recording session for a given account you will need to manually complete the MFA challenge. On subsequent recordings and playbacks with that account, MFA should be bypassed automatically — the extension saves device identity cookies in `auth-states/<hostname>---<username>.json` for reuse. The auth state is continuously updated after each successful login, so the cookie should stay fresh. If issues arise, you may need to manually enter the MFA code again during recording and/or playback.
 - **One-time UI elements will cause playback failures.** If you interact with transient elements during recording — such as popovers, toast notifications, or first-time-use prompts — those steps will likely fail on playback since the elements won't be present on subsequent runs. For now, you will need to manually remove those steps from the recording JSON. Automatic detection and filtering of one-time elements is planned for a future release.
 - **Salesforce sessions expire.** Auth state typically lasts 2–12 hours. When the session expires, re-run the recorder and log in again to refresh the stored state.
 - **Chromium only.** Recording uses Chrome DevTools Protocol (CDP) isolated world injection and only works with Chromium-based browsers.

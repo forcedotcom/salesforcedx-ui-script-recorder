@@ -44,6 +44,7 @@ npx salesforce-ui-script-recorder record [options]
 | `--viewport-height <height>` | `720` | Viewport height |
 | `--profile-dir <path>` | | Persist Chrome profile to this directory |
 | `--save-auth <path>` | | Save auth state (cookies/localStorage) to JSON |
+| `--org <usernameOrAlias>` | | Log in via a Salesforce CLI-authenticated org instead of the login form — no credentials or MFA prompt needed |
 | `--cloud <cloud>` | | Cloud identifier for Playwright conversion |
 | `--user <user>` | | Username for Playwright conversion |
 | `--team <team>` | | Team name for Playwright conversion |
@@ -125,6 +126,28 @@ npx playwright test --headed
 
 > **Note:** Salesforce sessions expire (typically 2-12 hours). When the session expires, re-run the recorder with `--profile-dir` and log in again to refresh the stored state.
 
+## Logging In via the Salesforce CLI (No Credentials, No MFA)
+
+If you're already authenticated to an org through the [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) (`sf`), you can record and play back against it directly — no username, password, or MFA prompt, since the CLI already holds a valid OAuth token for that org.
+
+```bash
+# One-time setup: authenticate an org with the CLI (handles MFA/SSO once)
+sf org login web
+sf org list   # confirm the org shows up as "Connected"
+
+# Record — the browser opens already logged into the org
+npx salesforce-ui-script-recorder record --org myorg -o ./test-plans/playwright/test.json
+
+# Playback — the generated spec resolves a fresh login from the CLI at runtime
+SALESFORCE_UI_SCRIPT_RECORDER_ORG=myorg npx playwright test --headed
+```
+
+`--org` accepts either a username or an alias from `sf org list`. It can be combined with `--url` to land on a specific page after login (a full URL or a bare path like `/lightning/o/Account/list`) — otherwise recording starts on the org's home page.
+
+**How it stays secure:** `sf org open -o <org> --url-only` returns a one-time "frontdoor" URL containing a live session token. That token is only ever held in memory to navigate the browser — it is **never** written to the recording JSON, the generated `.spec.js`, or any log output. Both the recording (`record --org`) and the generated test's `SALESFORCE_UI_SCRIPT_RECORDER_ORG` playback preamble re-resolve this URL fresh each time they run, so nothing is cached or shared, and playback never goes stale as long as the CLI's org token is valid (the CLI auto-refreshes it).
+
+This is additive — it doesn't replace `--profile-dir`/`--save-auth`, which still work unchanged for arbitrary URLs and non-CLI logins. If `SALESFORCE_UI_SCRIPT_RECORDER_ORG` is unset at playback time, the generated test's CLI-login step is a no-op and the recorded steps run exactly as before.
+
 ## Running Generated Tests
 
 Generated Playwright scripts are saved to the `test-plans/playwright/` directory as `.spec.js` files. Run them with:
@@ -147,6 +170,7 @@ salesforce-ui-script-recorder/
 ├── bin/cli.js                        # CLI entry point
 ├── src/
 │   ├── index.js                      # Main orchestrator (Playwright + CDP + WS)
+│   ├── sf-cli.js                     # Salesforce CLI wrapper (org list, frontdoor login URL)
 │   ├── server.js                     # WebSocket server
 │   ├── build.js                      # esbuild bundler for injected scripts
 │   ├── playwright-converter.js       # JSON → Playwright script converter

@@ -40,8 +40,8 @@ This downloads the correct platform-specific Playwright browser binary for your 
 
 **Command Palette:** `Salesforce UI Script Recorder: Start UI Recording`
 
-1. Opens an input box prompting for a URL
-2. Launches a Chromium browser navigated to that URL
+1. Opens a quick pick asking how to log in: an org already authenticated via the Salesforce CLI (`sf org login web` — no credentials or MFA prompt) or a manually entered URL
+2. Launches a Chromium browser navigated to that URL (or already logged into the chosen org)
 3. A progress notification appears — use the **in-browser overlay controls** or press **Cancel** to stop and save
 4. On completion, a notification shows how many events were recorded
 5. The generated `.spec.js` Playwright test file opens automatically
@@ -77,6 +77,7 @@ fresh-ui-recorder/
   .vscodeignore                      Packaging exclusions for vsce
   bin/cli.js                         CLI entry point
   src/                               Recorder and converter source
+    sf-cli.js                        Salesforce CLI wrapper (org list, frontdoor login URL)
   images/
     icon.png                         Extension icon
     param-icon.svg                   Parameterize action icon
@@ -84,6 +85,7 @@ fresh-ui-recorder/
   vscode-extension/
     extension.js                     Extension entry point (activates commands)
     package.json                     CommonJS type override for this directory
+    sf-cli.js                        Salesforce CLI wrapper for the org picker/selector (CommonJS)
     parameterize-wizard.js           Step parameterization UI wizard
     recording-codelens-provider.js   CodeLens actions on recording files
     decorations.js                   Editor decorations for recordings

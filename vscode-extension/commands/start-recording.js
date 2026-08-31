@@ -12,30 +12,104 @@ const fs = require('fs');
 const path = require('path');
 const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
 const { resolveNodePath } = require('../resolve-node');
+const { listSalesforceCliOrgs } = require('../sf-cli');
+
+/**
+ * Ask the user whether to log in via a Salesforce CLI-authenticated org
+ * (no credentials/MFA needed) or by entering a URL and using the standard
+ * login form. Returns `{ org, url }` — exactly one of which is set to a
+ * meaningful value for the chosen path — or `null` if the user cancelled.
+ */
+async function pickLoginMode() {
+  const DEFAULT_URL = 'https://login.salesforce.com';
+
+  const choice = await vscode.window.showQuickPick(
+    [
+      {
+        label: '$(key) Log in with a Salesforce CLI org',
+        description: 'No password or MFA prompt — uses an org you already authenticated via "sf org login web"',
+        mode: 'cli',
+      },
+      {
+        label: '$(globe) Enter a URL manually',
+        description: 'Log in with the standard Salesforce login form',
+        mode: 'manual',
+      },
+    ],
+    { placeHolder: 'How should the recorder log in?' }
+  );
+  if (choice === undefined) return null;
+
+  if (choice.mode === 'manual') {
+    let url = await vscode.window.showInputBox({
+      prompt: 'Enter the URL to record (leave empty for login.salesforce.com)',
+      placeHolder: 'https://myorg.salesforce.com',
+      validateInput: (value) => {
+        if (!value || !value.trim()) return null; // empty is valid — uses default
+        const normalized = value.match(/^https?:\/\//) ? value : `https://${value}`;
+        try { new URL(normalized); return null; } catch { return 'Please enter a valid URL'; }
+      },
+    });
+    if (url === undefined) return null; // user pressed Escape
+
+    // Default to login.salesforce.com if empty, auto-prepend https:// if no protocol
+    url = url.trim() || DEFAULT_URL;
+    if (!url.match(/^https?:\/\//)) {
+      url = `https://${url}`;
+    }
+    return { org: null, url };
+  }
+
+  // CLI-org path
+  let orgs;
+  try {
+    orgs = await listSalesforceCliOrgs();
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      err.message ||
+        'Salesforce UI Script Recorder: Could not list Salesforce CLI orgs. Run "sf org login web" to authenticate an org, then try again.'
+    );
+    return null;
+  }
+  if (orgs.length === 0) {
+    vscode.window.showErrorMessage(
+      'Salesforce UI Script Recorder: No connected orgs found. Run "sf org login web" to authenticate an org, then try again.'
+    );
+    return null;
+  }
+
+  const orgItems = orgs.map((o) => ({
+    label: o.alias ? `${o.alias} ($(account) ${o.username})` : o.username,
+    detail: o.instanceUrl,
+    org: o,
+  }));
+  const pickedOrg = await vscode.window.showQuickPick(orgItems, {
+    placeHolder: 'Select a Salesforce org to record against',
+  });
+  if (pickedOrg === undefined) return null;
+
+  const landingPath = await vscode.window.showInputBox({
+    prompt: 'Path to open after login (optional — leave empty for the org home page)',
+    placeHolder: '/lightning/o/Account/list',
+  });
+  if (landingPath === undefined) return null; // user pressed Escape
+
+  return {
+    org: pickedOrg.org.username,
+    url: landingPath.trim() || null,
+    displayUrl: pickedOrg.org.instanceUrl,
+  };
+}
 
 function register(context, outputChannel) {
   return vscode.commands.registerCommand(
     'salesforce-ui-script-recorder.startRecording',
     async () => {
-      const DEFAULT_URL = 'https://login.salesforce.com';
+      const loginMode = await pickLoginMode();
+      if (loginMode === null) return;
 
-      let url = await vscode.window.showInputBox({
-        prompt: 'Enter the URL to record (leave empty for login.salesforce.com)',
-        placeHolder: 'https://myorg.salesforce.com',
-        validateInput: (value) => {
-          if (!value || !value.trim()) return null; // empty is valid — uses default
-          const normalized = value.match(/^https?:\/\//) ? value : `https://${value}`;
-          try { new URL(normalized); return null; } catch { return 'Please enter a valid URL'; }
-        },
-      });
-
-      if (url === undefined) return; // user pressed Escape
-
-      // Default to login.salesforce.com if empty, auto-prepend https:// if no protocol
-      url = url.trim() || DEFAULT_URL;
-      if (!url.match(/^https?:\/\//)) {
-        url = `https://${url}`;
-      }
+      const { org } = loginMode;
+      let url = loginMode.url;
 
       const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
       if (!workspaceFolder) {
@@ -64,28 +138,39 @@ function register(context, outputChannel) {
       const cliPath = path.resolve(__dirname, '..', '..', 'recorder-cli', 'bin', 'cli.js');
       const cliRoot = path.resolve(__dirname, '..', '..');
       const authStatesDir = path.join(workspaceFolder.uri.fsPath, 'auth-states');
-      const args = [cliPath, 'record', '--url', url, '--output', outputPath, '--save-auth', authStatesDir];
+      const args = [cliPath, 'record', '--output', outputPath];
 
-      // If multiple auth-state files exist for this hostname, let the user pick
-      let hostname;
-      try { hostname = new URL(url).hostname; } catch {}
-      if (hostname && fs.existsSync(authStatesDir)) {
-        const matches = fs.readdirSync(authStatesDir)
-          .filter((f) => f.startsWith(hostname + '---') && f.endsWith('.json'));
-        if (matches.length > 1) {
-          const items = [
-            { label: '$(add) New session', description: 'Start fresh without loading saved auth', file: null },
-            ...matches.map((f) => {
-              const username = f.replace(`${hostname}---`, '').replace(/\.json$/, '');
-              return { label: username, description: f, file: f };
-            }),
-          ];
-          const picked = await vscode.window.showQuickPick(items, {
-            placeHolder: 'Multiple accounts found — select which auth state to load',
-          });
-          if (picked === undefined) return;
-          if (picked.file) {
-            args.push('--load-auth', path.join(authStatesDir, picked.file));
+      if (org) {
+        // CLI-org login: the recorder resolves a fresh, credential-free session
+        // from the Salesforce CLI itself — no --save-auth/--load-auth needed.
+        args.push('--org', org);
+        if (url) {
+          args.push('--url', url);
+        }
+      } else {
+        args.push('--url', url, '--save-auth', authStatesDir);
+
+        // If multiple auth-state files exist for this hostname, let the user pick
+        let hostname;
+        try { hostname = new URL(url).hostname; } catch {}
+        if (hostname && fs.existsSync(authStatesDir)) {
+          const matches = fs.readdirSync(authStatesDir)
+            .filter((f) => f.startsWith(hostname + '---') && f.endsWith('.json'));
+          if (matches.length > 1) {
+            const items = [
+              { label: '$(add) New session', description: 'Start fresh without loading saved auth', file: null },
+              ...matches.map((f) => {
+                const username = f.replace(`${hostname}---`, '').replace(/\.json$/, '');
+                return { label: username, description: f, file: f };
+              }),
+            ];
+            const picked = await vscode.window.showQuickPick(items, {
+              placeHolder: 'Multiple accounts found — select which auth state to load',
+            });
+            if (picked === undefined) return;
+            if (picked.file) {
+              args.push('--load-auth', path.join(authStatesDir, picked.file));
+            }
           }
         }
       }
@@ -98,7 +183,8 @@ function register(context, outputChannel) {
         },
         (progress, token) => {
           return new Promise((resolve) => {
-            progress.report({ message: `Recording: ${url} — use the overlay controls or press Cancel to stop and save` });
+            const target = org ? `${org} (via Salesforce CLI)` : url;
+            progress.report({ message: `Recording: ${target} — use the overlay controls or press Cancel to stop and save` });
 
             outputChannel.clear();
             outputChannel.show(true);

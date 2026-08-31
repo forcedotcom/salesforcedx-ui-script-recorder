@@ -35,6 +35,7 @@ program
   .option('--profile-dir <path>', 'Persist Chrome profile to this directory (reuse login across recordings)')
   .option('--save-auth <path>', 'Save device identity cookies (sfdc_lv2) to JSON for MFA bypass on playback')
   .option('--load-auth <path>', 'Load a specific auth-state JSON file as storageState')
+  .option('--org <usernameOrAlias>', 'Log in via a Salesforce CLI-authenticated org instead of the login form (no credentials needed, MFA already satisfied by "sf org login web")')
   .option('--cloud <cloud>', 'Cloud identifier for Playwright conversion', '')
   .option('--user <user>', 'Username for Playwright conversion', '')
   .option('--team <team>', 'Team name for Playwright conversion', '')
@@ -47,7 +48,11 @@ program
     }
 
     console.log(chalk.blue.bold('\n🎬 Salesforce UI Script Recorder\n'))
-    console.log(chalk.gray(`  URL: ${options.url}`))
+    if (options.org) {
+      console.log(chalk.gray(`  Org: ${options.org} (via Salesforce CLI — no login form)`))
+    } else {
+      console.log(chalk.gray(`  URL: ${options.url}`))
+    }
     console.log(chalk.gray(`  Output: ${options.output}`))
     console.log(chalk.gray(`  Browser: ${options.browser}\n`))
 

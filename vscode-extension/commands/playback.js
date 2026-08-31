@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
 const { clearInProgress } = require('./results-viewer');
+const { listSalesforceCliOrgs } = require('../sf-cli');
 
 // Session cache for parameter values (cleared when extension reloads)
 const paramCache = new Map();
@@ -131,6 +132,19 @@ function register(context) {
         }
       }
 
+      // List Salesforce CLI-authenticated orgs for the org selector — additive
+      // alongside username/password params, so users on orgs with 2FA/SSO can
+      // skip the login form entirely. Non-fatal if "sf" isn't installed: the
+      // selector just shows the error inline and playback falls back to
+      // credentials as before.
+      let availableOrgs = [];
+      let orgListError = null;
+      try {
+        availableOrgs = await listSalesforceCliOrgs();
+      } catch (err) {
+        orgListError = err.message;
+      }
+
       const result = await showPlaybackForm(context, paramNames, cachedValues, {
         credentialParams,
         dataParams,
@@ -145,6 +159,8 @@ function register(context) {
         dataDir,
         specPath,
         specFileName: path.basename(specPath),
+        availableOrgs,
+        orgListError,
       });
       if (!result) return;
 
@@ -163,6 +179,11 @@ function register(context) {
       const headless = result.headed === false;
       const playwrightArgs = ['playwright', 'test', specFileName];
       if (!headless) playwrightArgs.push('--headed');
+
+      // Same org, N sessions: every spawned Playwright process (single or
+      // bulk) resolves its own fresh frontdoor URL from this one org, so
+      // there's no shared/racing session state across parallel sessions.
+      const selectedOrg = result.org || null;
 
       if (result.mode === 'bulk') {
         const { parallelCount, usersFile, dataFiles } = result;
@@ -208,6 +229,7 @@ function register(context) {
             SALESFORCE_UI_SCRIPT_RECORDER_BATCH_TIMESTAMP: batchTimestamp,
             SALESFORCE_UI_SCRIPT_RECORDER_SESSION_INDEX: String(i + 1),
             ...(headless && { SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS: '1' }),
+            ...(selectedOrg && { SALESFORCE_UI_SCRIPT_RECORDER_ORG: selectedOrg }),
           };
           const userRow = userRowCount > 0 ? userRows[i % userRowCount] : {};
           for (const [key, value] of Object.entries(userRow)) {
@@ -260,6 +282,7 @@ function register(context) {
         // Build env vars from parameter values
         const envVars = {};
         if (headless) envVars.SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS = '1';
+        if (selectedOrg) envVars.SALESFORCE_UI_SCRIPT_RECORDER_ORG = selectedOrg;
         for (const [paramName, value] of Object.entries(params)) {
           envVars[`SALESFORCE_UI_SCRIPT_RECORDER_${paramName.toUpperCase()}`] = value;
         }
@@ -434,6 +457,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
     let activeMode = 'single';
     let selectedUserFile = null;
     let selectedDataFiles = [];
+    let selectedOrg = null;
 
     function refreshPanel() {
       const freshUserCsvFiles = fs.existsSync(usersDir)
@@ -465,6 +489,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         activeMode,
         selectedUserFile,
         selectedDataFiles,
+        selectedOrg,
         availableRecordings,
       });
     }
@@ -543,6 +568,9 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
             activeMode,
             selectedUserFile,
             selectedDataFiles,
+            selectedOrg,
+            availableOrgs: bulkOptions.availableOrgs,
+            orgListError: bulkOptions.orgListError,
             availableRecordings,
           });
         }
@@ -570,6 +598,8 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         selectedDataFiles = message.data;
       } else if (message.type === 'userSelectionChange') {
         selectedUserFile = message.data;
+      } else if (message.type === 'orgSelectionChange') {
+        selectedOrg = message.data || null;
       } else if (message.type === 'generateUsersFile') {
         const filename = message.data?.filename || 'users.csv';
         const currentCredParams = bulkOptions.credentialParams || credentialParams;
@@ -618,7 +648,23 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
 }
 
 function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}) {
-  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], specFileName = '', hasResults = false, availableRecordings = [] } = bulkOptions;
+  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], selectedOrg = null, availableOrgs = [], orgListError = null, specFileName = '', hasResults = false, availableRecordings = [] } = bulkOptions;
+
+  const orgOptions = availableOrgs
+    .map(
+      (o) => `<option value="${escapeHtml(o.username)}"${o.username === selectedOrg ? ' selected' : ''}>${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}</option>`
+    )
+    .join('');
+
+  const orgField = `
+      <div class="field" id="org-field">
+        <label for="org-select">Salesforce CLI org <span class="hint">(optional — skips the login form, no credentials or MFA needed)</span></label>
+        <select id="org-select" class="recording-select" style="width: 100%; max-width: 350px;">
+          <option value="">None — use credentials below</option>
+          ${orgOptions}
+        </select>
+        ${orgListError ? `<div class="field-error">${escapeHtml(orgListError)}</div>` : ''}
+      </div>`;
 
   const credentialFields = credentialParams
     .map(
@@ -1291,6 +1337,8 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
   </div>
 
   <div class="section">
+    ${orgField}
+
     <div class="mode-switch">
       <button id="mode-single" class="${activeMode === 'single' ? 'active' : ''}">&#9655; Single Run</button>
       <button id="mode-bulk" class="${activeMode === 'bulk' ? 'active' : ''}">&#9776; Bulk / Parallel</button>
@@ -1410,6 +1458,13 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     }
 
     let mode = '${activeMode}';
+
+    const orgSelect = document.getElementById('org-select');
+    if (orgSelect) {
+      orgSelect.addEventListener('change', () => {
+        vscode.postMessage({ type: 'orgSelectionChange', data: orgSelect.value });
+      });
+    }
 
     // User file custom dropdown
     const usersTrigger = document.getElementById('users-select-trigger');
@@ -1736,16 +1791,17 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     runBtn.addEventListener('click', () => {
       if (runBtn.disabled) return;
       const headed = document.getElementById('headed-toggle').checked;
+      const org = orgSelect ? orgSelect.value || null : null;
       if (mode === 'single') {
         const params = {};
         paramNames.forEach((name) => {
           params[name] = document.getElementById('param-' + name).value;
         });
-        vscode.postMessage({ type: 'run', data: { params, headed } });
+        vscode.postMessage({ type: 'run', data: { params, headed, org } });
       } else {
         const parallelCount = document.getElementById('parallel-count').value;
         const usersFile = selectedUserFile;
-        vscode.postMessage({ type: 'run', data: { mode: 'bulk', parallelCount: parseInt(parallelCount, 10), usersFile, dataFiles: dataSelected, headed } });
+        vscode.postMessage({ type: 'run', data: { mode: 'bulk', parallelCount: parseInt(parallelCount, 10), usersFile, dataFiles: dataSelected, headed, org } });
       }
     });
 
