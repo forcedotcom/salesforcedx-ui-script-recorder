@@ -7,15 +7,24 @@
 .chrome-profile/**
 .agents/**
 .salesforce-ui-script-recorder/**
+.tmp-cli-org-verify/**
 recordings/**
 docs/**
 playback-results/**
 test-plans/**
 test-results/**
+coverage/**
 recorder-cli/scripts/**
+recorder-cli/test/**
+vscode-extension/test/**
 auth-state.json
+design-doc.md
 package-lock.json
 *.vsix
+jest.config.cjs
+babel.config.cjs
+recorder-cli/jest.config.cjs
+vscode-extension/jest.config.cjs
 recorder-cli/README.md
 node_modules/**/*.md
 

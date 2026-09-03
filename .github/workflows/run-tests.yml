@@ -1,0 +1,46 @@
+name: run-tests
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to check out and test'
+        required: false
+        type: string
+        default: ${{ github.sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build, inject, and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build injected script bundle
+        run: npm run build:injected
+
+      - name: Run tests
+        run: npm test -- --ci
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14

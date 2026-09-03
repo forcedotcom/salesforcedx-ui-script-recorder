@@ -1,0 +1,131 @@
+name: publish
+
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g. v1.4.0)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-release:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    # Requires manual approval before any build/publish steps run.
+    # Configure this environment under Settings > Environments and add
+    # required reviewers, plus the VSCE_PERSONAL_ACCESS_TOKEN and OVSX_PAT secrets.
+    environment: publish
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve tag
+        id: resolve
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: echo "tag=${RELEASE_TAG:-$DISPATCH_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.tag }}
+
+      - name: Verify tag matches package.json version
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$PACKAGE_VERSION" ]; then
+            echo "::error::Tag '$TAG' does not match package.json version 'v$PACKAGE_VERSION'"
+            exit 1
+          fi
+
+  run-tests:
+    name: Test release tag
+    needs: validate-release
+    uses: ./.github/workflows/run-tests.yml
+    with:
+      ref: ${{ needs.validate-release.outputs.tag }}
+
+  build-vsix:
+    name: Build release VSIX
+    needs: [validate-release, run-tests]
+    uses: ./.github/workflows/create-vsix-artifact.yml
+    with:
+      ref: ${{ needs.validate-release.outputs.tag }}
+
+  publish-vscode:
+    name: Publish to VS Marketplace
+    needs: build-vsix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix
+
+      - name: Publish
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PERSONAL_ACCESS_TOKEN }}
+        run: |
+          VSIX_FILE=$(find . -maxdepth 1 -name '*.vsix' | head -n1)
+          npx --yes @vscode/vsce publish --packagePath "$VSIX_FILE" --pat "$VSCE_PAT"
+
+  publish-openvsx:
+    name: Publish to Open VSX
+    needs: build-vsix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Download VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix
+
+      - name: Publish
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          VSIX_FILE=$(find . -maxdepth 1 -name '*.vsix' | head -n1)
+          npx --yes ovsx publish "$VSIX_FILE" -p "$OVSX_PAT"
+
+  attach-release-assets:
+    name: Attach VSIX to release
+    if: github.event_name == 'release'
+    needs: [validate-release, publish-vscode, publish-openvsx]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix
+
+      - name: Download SHA256
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix-sha256
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate-release.outputs.tag }}
+          files: |
+            *.vsix
+            SHA256.txt

@@ -24,8 +24,8 @@
     "Testing"
   ],
   "activationEvents": [
-    "onLanguage:json",
-    "onLanguage:javascript",
+    "workspaceContains:**/test-plans/playwright/*.json",
+    "workspaceContains:**/test-plans/playwright/*.spec.js",
     "onView:salesforceUiScriptRecorderRecordings"
   ],
   "contributes": {
@@ -271,6 +271,7 @@
     "@babel/core": "^8.0.1",
     "@babel/preset-env": "^8.0.2",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
     "babel-jest": "^30.4.1",
     "babel-plugin-transform-import-meta": "^3.0.0",
     "esbuild": "^0.21.0",
