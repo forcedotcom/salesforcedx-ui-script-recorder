@@ -8,7 +8,7 @@ Record and replay Salesforce UI interactions as Playwright tests directly from V
 
 Before using Salesforce UI Script Recorder, ensure the following tools are installed on your machine.
 
-## 1. Node.js (v18 or later)
+## 1. Node.js (v22 or later)
 
 Node.js is required to run the recorder and execute generated tests.
 
