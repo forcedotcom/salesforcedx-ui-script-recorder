@@ -62,7 +62,7 @@ Playwright requires browser binaries to run tests. Install Chromium (the default
 npx playwright install chromium
 ```
 
-## 4. Salesforce CLI (optional, recommended)
+## 4. Salesforce CLI
 
 Installing the [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli) (`sf`) lets you record and play back against an org you're already logged into — no username, password, or MFA code typed into the recorder, ever. See [Log In via Salesforce CLI](#log-in-via-salesforce-cli-no-credentials-no-mfa) below.
 
@@ -78,6 +78,7 @@ After completing the steps above, confirm everything is working:
 ```bash
 node --version          # Should print v18.x.x or later
 npx playwright --version   # Should print the installed Playwright version
+sf --version            # Should print the installed Salesforce CLI version
 ```
 
 You're all set! Proceed to the next section to install the extension.
