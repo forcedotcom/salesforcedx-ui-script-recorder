@@ -9,6 +9,16 @@ on:
         description: 'Release tag to publish (e.g. v1.4.0)'
         type: string
         required: true
+      dry_run:
+        description: 'Print the publish commands without actually publishing'
+        type: boolean
+        required: false
+        default: false
+      pre_release:
+        description: 'Mark this package as a pre-release'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -23,13 +33,21 @@ jobs:
     environment: publish
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
+      dry_run: ${{ steps.resolve.outputs.dry_run }}
+      pre_release: ${{ steps.resolve.outputs.pre_release }}
     steps:
       - name: Resolve tag
         id: resolve
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           DISPATCH_TAG: ${{ inputs.tag }}
-        run: echo "tag=${RELEASE_TAG:-$DISPATCH_TAG}" >> "$GITHUB_OUTPUT"
+          DISPATCH_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          DISPATCH_PRE_RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.pre_release }}
+          RELEASE_PRE_RELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          echo "tag=${RELEASE_TAG:-$DISPATCH_TAG}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${DISPATCH_DRY_RUN:-false}" >> "$GITHUB_OUTPUT"
+          echo "pre_release=${DISPATCH_PRE_RELEASE:-${RELEASE_PRE_RELEASE:-false}}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout tag
         uses: actions/checkout@v4
@@ -62,7 +80,7 @@ jobs:
 
   publish-vscode:
     name: Publish to VS Marketplace
-    needs: build-vsix
+    needs: [build-vsix, validate-release]
     runs-on: ubuntu-latest
     steps:
       - name: Set up Node.js
@@ -75,16 +93,73 @@ jobs:
         with:
           name: vsix
 
-      - name: Publish
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PERSONAL_ACCESS_TOKEN }}
+      - name: Download SHA256
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix-sha256
+
+      - name: Validate VSIX
+        id: validate
         run: |
           VSIX_FILE=$(find . -maxdepth 1 -name '*.vsix' | head -n1)
-          npx --yes @vscode/vsce publish --packagePath "$VSIX_FILE" --pat "$VSCE_PAT"
+          if [ -z "$VSIX_FILE" ]; then
+            echo "::error::No .vsix file found to publish"
+            exit 1
+          fi
+          echo "vsix_file=$VSIX_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Audit publish attempt
+        env:
+          VSIX_FILE: ${{ steps.validate.outputs.vsix_file }}
+          PRE_RELEASE: ${{ needs.validate-release.outputs.pre_release }}
+          DRY_RUN: ${{ needs.validate-release.outputs.dry_run }}
+        run: |
+          {
+            echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "actor=$GITHUB_ACTOR repository=$GITHUB_REPOSITORY run_id=$GITHUB_RUN_ID"
+            echo "marketplace=Visual Studio Marketplace"
+            echo "vsix_file=$VSIX_FILE size_bytes=$(stat -c%s "$VSIX_FILE")"
+            echo "vsix_sha256=$(cut -d' ' -f1 SHA256.txt)"
+            echo "pre_release=$PRE_RELEASE dry_run=$DRY_RUN"
+          } | tee -a publish-audit-vscode.log
+
+      - name: Publish
+        id: publish
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PERSONAL_ACCESS_TOKEN }}
+          VSIX_FILE: ${{ steps.validate.outputs.vsix_file }}
+          PRE_RELEASE: ${{ needs.validate-release.outputs.pre_release }}
+          DRY_RUN: ${{ needs.validate-release.outputs.dry_run }}
+        run: |
+          PRE_RELEASE_FLAG=""
+          if [ "$PRE_RELEASE" = "true" ]; then
+            PRE_RELEASE_FLAG="--pre-release"
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "[dry-run] npx --yes @vscode/vsce publish --packagePath $VSIX_FILE --pat *** $PRE_RELEASE_FLAG"
+          else
+            ARGS=(--packagePath "$VSIX_FILE" --pat "$VSCE_PAT")
+            if [ -n "$PRE_RELEASE_FLAG" ]; then
+              ARGS+=("$PRE_RELEASE_FLAG")
+            fi
+            npx --yes @vscode/vsce publish "${ARGS[@]}"
+          fi
+
+      - name: Audit publish result
+        if: always() && needs.validate-release.outputs.dry_run != 'true'
+        run: echo "outcome=${{ steps.publish.outcome }}" | tee -a publish-audit-vscode.log
+
+      - name: Upload audit log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-audit-vscode
+          path: publish-audit-vscode.log
+          retention-days: 90
 
   publish-openvsx:
     name: Publish to Open VSX
-    needs: build-vsix
+    needs: [build-vsix, validate-release]
     runs-on: ubuntu-latest
     steps:
       - name: Set up Node.js
@@ -97,12 +172,69 @@ jobs:
         with:
           name: vsix
 
-      - name: Publish
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      - name: Download SHA256
+        uses: actions/download-artifact@v4
+        with:
+          name: vsix-sha256
+
+      - name: Validate VSIX
+        id: validate
         run: |
           VSIX_FILE=$(find . -maxdepth 1 -name '*.vsix' | head -n1)
-          npx --yes ovsx publish "$VSIX_FILE" -p "$OVSX_PAT"
+          if [ -z "$VSIX_FILE" ]; then
+            echo "::error::No .vsix file found to publish"
+            exit 1
+          fi
+          echo "vsix_file=$VSIX_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Audit publish attempt
+        env:
+          VSIX_FILE: ${{ steps.validate.outputs.vsix_file }}
+          PRE_RELEASE: ${{ needs.validate-release.outputs.pre_release }}
+          DRY_RUN: ${{ needs.validate-release.outputs.dry_run }}
+        run: |
+          {
+            echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "actor=$GITHUB_ACTOR repository=$GITHUB_REPOSITORY run_id=$GITHUB_RUN_ID"
+            echo "marketplace=Open VSX Registry"
+            echo "vsix_file=$VSIX_FILE size_bytes=$(stat -c%s "$VSIX_FILE")"
+            echo "vsix_sha256=$(cut -d' ' -f1 SHA256.txt)"
+            echo "pre_release=$PRE_RELEASE dry_run=$DRY_RUN"
+          } | tee -a publish-audit-openvsx.log
+
+      - name: Publish
+        id: publish
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          VSIX_FILE: ${{ steps.validate.outputs.vsix_file }}
+          PRE_RELEASE: ${{ needs.validate-release.outputs.pre_release }}
+          DRY_RUN: ${{ needs.validate-release.outputs.dry_run }}
+        run: |
+          PRE_RELEASE_FLAG=""
+          if [ "$PRE_RELEASE" = "true" ]; then
+            PRE_RELEASE_FLAG="--pre-release"
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "[dry-run] npx --yes ovsx publish $VSIX_FILE -p *** $PRE_RELEASE_FLAG"
+          else
+            ARGS=("$VSIX_FILE" -p "$OVSX_PAT")
+            if [ -n "$PRE_RELEASE_FLAG" ]; then
+              ARGS+=("$PRE_RELEASE_FLAG")
+            fi
+            npx --yes ovsx publish "${ARGS[@]}"
+          fi
+
+      - name: Audit publish result
+        if: always() && needs.validate-release.outputs.dry_run != 'true'
+        run: echo "outcome=${{ steps.publish.outcome }}" | tee -a publish-audit-openvsx.log
+
+      - name: Upload audit log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-audit-openvsx
+          path: publish-audit-openvsx.log
+          retention-days: 90
 
   attach-release-assets:
     name: Attach VSIX to release
