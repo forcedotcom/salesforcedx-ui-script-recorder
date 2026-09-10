@@ -7,14 +7,14 @@ jest.mock('fs', () => ({
 jest.mock('child_process', () => ({ spawn: jest.fn() }))
 jest.mock('../ensure-playwright-config', () => ({ ensurePlaywrightConfig: jest.fn(() => ({ created: false })) }))
 jest.mock('../resolve-node', () => ({ resolveNodePath: jest.fn(() => '/usr/bin/node') }))
-jest.mock('../sf-cli', () => ({ listSalesforceCliOrgs: jest.fn() }))
+jest.mock('../sf-cli', () => ({ listSalesforceCliOrgs: jest.fn(), loginToNewOrgViaCli: jest.fn() }))
 
 const vscode = require('vscode')
 const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
 const { ensurePlaywrightConfig } = require('../ensure-playwright-config')
-const { listSalesforceCliOrgs } = require('../sf-cli')
+const { listSalesforceCliOrgs, loginToNewOrgViaCli } = require('../sf-cli')
 const { register } = require('../commands/start-recording')
 
 const RECORDINGS_DIR = path.join('/ws', 'test-plans', 'playwright')
@@ -24,6 +24,7 @@ const CLI_PATH = path.resolve(CLI_ROOT, 'recorder-cli', 'bin', 'cli.js')
 
 const MANUAL_CHOICE = { label: '$(globe) Enter a URL manually', mode: 'manual' }
 const CLI_CHOICE = { label: '$(key) Log in with a Salesforce CLI org', mode: 'cli' }
+const NEW_ORG_ITEM = { label: '$(add) Log in to a new org…', description: 'Opens a browser to authenticate via "sf org login web"', isNewOrg: true }
 
 afterEach(() => {
   jest.clearAllMocks()
@@ -140,15 +141,17 @@ describe('pickLoginMode — cancellation at each step', () => {
     )
   })
 
-  it('shows an error when there are no connected orgs', async () => {
+  it('offers only the "log in to a new org" item when there are no connected orgs', async () => {
     vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
     listSalesforceCliOrgs.mockResolvedValueOnce([])
+    vscode.window.showQuickPick.mockResolvedValueOnce(undefined)
     const { handler } = getHandler()
 
     await handler()
 
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-      expect.stringContaining('No connected orgs found')
+    expect(vscode.window.showQuickPick.mock.calls[1][0]).toEqual([NEW_ORG_ITEM])
+    expect(vscode.window.showQuickPick.mock.calls[1][1]).toEqual(
+      expect.objectContaining({ placeHolder: expect.stringContaining('No connected orgs found') })
     )
     expect(spawn).not.toHaveBeenCalled()
   })
@@ -245,6 +248,7 @@ describe('pickLoginMode — CLI org selection', () => {
     }))
 
     expect(vscode.window.showQuickPick.mock.calls[1][0]).toEqual([
+      NEW_ORG_ITEM,
       { label: 'MyAlias ($(account) a@b.com)', detail: 'https://a.my.salesforce.com', org: expect.anything() }
     ])
   })
@@ -255,6 +259,7 @@ describe('pickLoginMode — CLI org selection', () => {
     }))
 
     expect(vscode.window.showQuickPick.mock.calls[1][0]).toEqual([
+      NEW_ORG_ITEM,
       { label: 'a@b.com', detail: 'https://a.my.salesforce.com', org: expect.anything() }
     ])
   })
@@ -278,6 +283,65 @@ describe('pickLoginMode — CLI org selection', () => {
 
     const args = getArgs()
     expect(args).toEqual(expect.arrayContaining(['--org', 'a@b.com', '--url', '/lightning/o/Account/list']))
+  })
+})
+
+describe('pickLoginMode — log in to a new org', () => {
+  function mockNewOrgLogin({ orgs = [], landingPath = '' } = {}) {
+    vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
+    listSalesforceCliOrgs.mockResolvedValueOnce(orgs)
+    vscode.window.showQuickPick.mockResolvedValueOnce(NEW_ORG_ITEM)
+    vscode.window.showInputBox.mockResolvedValueOnce(landingPath)
+  }
+
+  it('wraps the login call in a cancellable progress notification', async () => {
+    loginToNewOrgViaCli.mockResolvedValueOnce({ username: 'new@example.com', alias: null, instanceUrl: 'https://new' })
+    await reachSpawn(() => mockNewOrgLogin())
+
+    expect(vscode.window.withProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining('Complete the login in your browser'),
+        cancellable: true
+      }),
+      expect.any(Function)
+    )
+    expect(loginToNewOrgViaCli).toHaveBeenCalledWith(expect.anything())
+  })
+
+  it('proceeds with the newly authenticated org on success', async () => {
+    loginToNewOrgViaCli.mockResolvedValueOnce({ username: 'new@example.com', alias: 'newOrg', instanceUrl: 'https://new' })
+    await reachSpawn(() => mockNewOrgLogin({ landingPath: '/lightning/o/Account/list' }))
+
+    const args = getArgs()
+    expect(args).toEqual(expect.arrayContaining(['--org', 'new@example.com', '--url', '/lightning/o/Account/list']))
+  })
+
+  it('shows an error and does not spawn when the login fails with a message', async () => {
+    loginToNewOrgViaCli.mockRejectedValueOnce(new Error('Login cancelled.'))
+    vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
+    listSalesforceCliOrgs.mockResolvedValueOnce([])
+    vscode.window.showQuickPick.mockResolvedValueOnce(NEW_ORG_ITEM)
+    const { handler } = getHandler()
+
+    await handler()
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Login cancelled.')
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('shows a default message when the login fails without one', async () => {
+    loginToNewOrgViaCli.mockRejectedValueOnce({})
+    vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
+    listSalesforceCliOrgs.mockResolvedValueOnce([])
+    vscode.window.showQuickPick.mockResolvedValueOnce(NEW_ORG_ITEM)
+    const { handler } = getHandler()
+
+    await handler()
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('Login failed')
+    )
+    expect(spawn).not.toHaveBeenCalled()
   })
 })
 
@@ -410,7 +474,7 @@ describe('register — saved-auth session picker (manual/url login only)', () =>
 
 function captureProgress() {
   const captured = { progress: { report: jest.fn() }, token: { isCancellationRequested: false, onCancellationRequested: jest.fn(() => ({ dispose: jest.fn() })) } }
-  vscode.window.withProgress.mockImplementationOnce((options, task) => task(captured.progress, captured.token))
+  vscode.window.withProgress.mockImplementation((options, task) => task(captured.progress, captured.token))
   return captured
 }
 

@@ -96,28 +96,55 @@ describe('sf-cli', () => {
     })
 
     it('requests a url-only frontdoor link for the given org', async () => {
-      respondWith(JSON.stringify({ status: 0, result: { url: 'https://org.my.salesforce.com/secur/frontdoor.jsp?sid=TOKEN' } }))
+      respondWith('Access org 00Dxx as user a@b.com with the following URL: https://org.my.salesforce.com/secur/frontdoor.jsp?sid=TOKEN\n')
 
       const url = await getFrontdoorUrl('myOrgAlias')
 
       expect(url).toBe('https://org.my.salesforce.com/secur/frontdoor.jsp?sid=TOKEN')
       const [, args] = execFile.mock.calls[0]
-      expect(args).toEqual(['org', 'open', '-o', 'myOrgAlias', '--url-only', '--json'])
+      expect(args).toEqual(['org', 'open', '-o', 'myOrgAlias', '--url-only'])
     })
 
     it('includes a --path argument when a landing path is requested', async () => {
-      respondWith(JSON.stringify({ status: 0, result: { url: 'https://org.my.salesforce.com/frontdoor?sid=TOKEN' } }))
+      respondWith('Access org 00Dxx as user a@b.com with the following URL: https://org.my.salesforce.com/frontdoor?sid=TOKEN\n')
 
       await getFrontdoorUrl('myOrgAlias', { path: '/lightning/page' })
 
       const [, args] = execFile.mock.calls[0]
-      expect(args).toEqual(['org', 'open', '-o', 'myOrgAlias', '--url-only', '--path', '/lightning/page', '--json'])
+      expect(args).toEqual(['org', 'open', '-o', 'myOrgAlias', '--url-only', '--path', '/lightning/page'])
+    })
+
+    it('takes the last url when an unrelated docs link appears earlier in a warning banner', async () => {
+      respondWith(
+        'For more info see https://developer.salesforce.com/docs/some-page.htm\n' +
+          'Access org 00Dxx as user a@b.com with the following URL: https://org.my.salesforce.com/secur/frontdoor.jsp?sid=TOKEN\n'
+      )
+
+      const url = await getFrontdoorUrl('myOrgAlias')
+
+      expect(url).toBe('https://org.my.salesforce.com/secur/frontdoor.jsp?sid=TOKEN')
+    })
+
+    it('extracts the url even when the CLI exits non-zero on an unrelated warning', async () => {
+      respondWith('Access org 00Dxx as user a@b.com with the following URL: https://org.my.salesforce.com/secur/frontdoor.jsp?sid=TOKEN\n', {
+        err: new Error('exit code 1')
+      })
+
+      const url = await getFrontdoorUrl('myOrgAlias')
+
+      expect(url).toBe('https://org.my.salesforce.com/secur/frontdoor.jsp?sid=TOKEN')
     })
 
     it('throws when the CLI succeeds but returns no url', async () => {
-      respondWith(JSON.stringify({ status: 0, result: {} }))
+      respondWith('Access org 00Dxx as user a@b.com')
 
       await expect(getFrontdoorUrl('myOrgAlias')).rejects.toThrow(/did not return a URL/)
+    })
+
+    it('rejects when the sf CLI is not installed', async () => {
+      respondWith('', { err: Object.assign(new Error('not found'), { code: 'ENOENT' }) })
+
+      await expect(getFrontdoorUrl('myOrgAlias')).rejects.toThrow(/Salesforce CLI \("sf"\) not found on PATH/)
     })
   })
 

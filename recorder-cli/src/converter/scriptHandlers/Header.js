@@ -52,7 +52,7 @@ async function loginViaSalesforceCliOrg(page) {
 
       let stdout;
       try {
-            ({ stdout } = await execFileAsync('sf', ['org', 'open', '-o', org, '--url-only', '--json']));
+            ({ stdout } = await execFileAsync('sf', ['org', 'open', '-o', org, '--url-only']));
       } catch (err) {
             if (err.code === 'ENOENT') {
                   throw new Error('Salesforce CLI ("sf") not found on PATH. Install it and run "sf org login web" to authenticate, then try again.');
@@ -60,14 +60,22 @@ async function loginViaSalesforceCliOrg(page) {
             throw err;
       }
 
-      const start = stdout.indexOf('{');
-      const end = stdout.lastIndexOf('}');
-      const parsed = start !== -1 && end !== -1 ? JSON.parse(stdout.slice(start, end + 1)) : null;
-      const url = parsed?.result?.url;
+      const url = extractUrl(stdout);
       if (!url) {
             throw new Error(\`"sf org open -o \${org} --url-only" did not return a URL. Run "sf org login web -o \${org}" and try again.\`);
       }
       await page.goto(url);
+}
+
+// "sf org open --url-only" no longer includes the URL in its --json result
+// (only orgId/username) since the URL is a live session credential — it's
+// only printed in the plain-text output. That output can also contain an
+// unrelated docs link inside its warning banner, so take the *last*
+// http(s) URL on stdout, which is always the actual login link.
+function extractUrl(text) {
+      if (!text) return null;
+      const matches = text.match(/https?:\\/\\/\\S+/g);
+      return matches ? matches[matches.length - 1] : null;
 }
 
 test.beforeEach(async ({ page }) => {
