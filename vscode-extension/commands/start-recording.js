@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
 const { resolveNodePath } = require('../resolve-node');
-const { listSalesforceCliOrgs } = require('../sf-cli');
+const { listSalesforceCliOrgs, loginToNewOrgViaCli } = require('../sf-cli');
 
 /**
  * Ask the user whether to log in via a Salesforce CLI-authenticated org
@@ -27,7 +27,7 @@ async function pickLoginMode() {
     [
       {
         label: '$(key) Log in with a Salesforce CLI org',
-        description: 'No password or MFA prompt — uses an org you already authenticated via "sf org login web"',
+        description: 'Logged-in OAuth session managed by the Salesforce CLI',
         mode: 'cli',
       },
       {
@@ -63,7 +63,13 @@ async function pickLoginMode() {
   // CLI-org path
   let orgs;
   try {
-    orgs = await listSalesforceCliOrgs();
+    orgs = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Salesforce UI Script Recorder: Loading Salesforce CLI orgs…',
+      },
+      () => listSalesforceCliOrgs()
+    );
   } catch (err) {
     vscode.window.showErrorMessage(
       err.message ||
@@ -71,22 +77,39 @@ async function pickLoginMode() {
     );
     return null;
   }
-  if (orgs.length === 0) {
-    vscode.window.showErrorMessage(
-      'Salesforce UI Script Recorder: No connected orgs found. Run "sf org login web" to authenticate an org, then try again.'
-    );
-    return null;
-  }
-
-  const orgItems = orgs.map((o) => ({
-    label: o.alias ? `${o.alias} ($(account) ${o.username})` : o.username,
-    detail: o.instanceUrl,
-    org: o,
-  }));
+  const orgItems = [
+    { label: '$(add) Log in to a new org…', description: 'Opens a browser to authenticate via "sf org login web"', isNewOrg: true },
+    ...orgs.map((o) => ({
+      label: o.alias ? `${o.alias} ($(account) ${o.username})` : o.username,
+      detail: o.instanceUrl,
+      org: o,
+    })),
+  ];
   const pickedOrg = await vscode.window.showQuickPick(orgItems, {
-    placeHolder: 'Select a Salesforce org to record against',
+    placeHolder: orgs.length === 0
+      ? 'No connected orgs found — log in to a new one'
+      : 'Select a Salesforce org to record against',
   });
   if (pickedOrg === undefined) return null;
+
+  let chosenOrg = pickedOrg.org;
+  if (pickedOrg.isNewOrg) {
+    try {
+      chosenOrg = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Salesforce UI Script Recorder: Complete the login in your browser…',
+          cancellable: true,
+        },
+        (progress, token) => loginToNewOrgViaCli(token)
+      );
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        err.message || 'Salesforce UI Script Recorder: Login failed. Try again.'
+      );
+      return null;
+    }
+  }
 
   const landingPath = await vscode.window.showInputBox({
     prompt: 'Path to open after login (optional — leave empty for the org home page)',
@@ -95,9 +118,9 @@ async function pickLoginMode() {
   if (landingPath === undefined) return null; // user pressed Escape
 
   return {
-    org: pickedOrg.org.username,
+    org: chosenOrg.username,
     url: landingPath.trim() || null,
-    displayUrl: pickedOrg.org.instanceUrl,
+    displayUrl: chosenOrg.instanceUrl,
   };
 }
 

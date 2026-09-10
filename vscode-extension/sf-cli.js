@@ -78,19 +78,85 @@ function listSalesforceCliOrgs() {
 }
 
 /**
+ * Launch `sf org login web` to authenticate a new org via browser. Resolves
+ * with the newly authenticated org once the flow completes in the browser.
+ * @param {import('vscode').CancellationToken} [cancellationToken] - if provided and cancelled, kills the login process and rejects.
+ * @returns {Promise<{ username: string, alias: string|null, instanceUrl: string }>}
+ */
+function loginToNewOrgViaCli(cancellationToken) {
+  return new Promise((resolve, reject) => {
+    let cancelled = false;
+
+    const child = execFile(
+      'sf',
+      ['org', 'login', 'web', '--json'],
+      { maxBuffer: 10 * 1024 * 1024, env: { ...process.env, PATH: getExtendedPath() } },
+      (err, stdout, stderr) => {
+        // Wait for the process to actually exit before settling, even on
+        // cancellation — `sf` binds a local OAuth redirect server on a fixed
+        // port (1717 by default), and resolving/rejecting as soon as kill()
+        // is *called* (rather than once the process has actually died) lets
+        // an immediate retry race the still-shutting-down process for that
+        // port, surfacing "Cannot start the OAuth redirect server".
+        if (cancelled) {
+          reject(new Error('Login cancelled.'));
+          return;
+        }
+
+        if (err && err.code === 'ENOENT') {
+          reject(new Error(SF_NOT_FOUND_MESSAGE));
+          return;
+        }
+
+        const parsed = extractJson(stdout);
+        if (!parsed) {
+          reject(new Error(
+            `Failed to parse "sf org login web --json" output: ${(err && err.message) || stderr || 'no JSON found'}`
+          ));
+          return;
+        }
+        if (parsed.status && parsed.status !== 0) {
+          reject(new Error(parsed.message || `sf org login web failed (status ${parsed.status})`));
+          return;
+        }
+
+        const result = parsed.result || {};
+        resolve({
+          username: result.username,
+          alias: result.alias || null,
+          instanceUrl: result.instanceUrl,
+        });
+      }
+    );
+
+    if (cancellationToken) {
+      cancellationToken.onCancellationRequested(() => {
+        cancelled = true;
+        child.kill();
+      });
+    }
+  });
+}
+
+/**
  * Pull the last top-level `{...}` JSON object out of a string. The CLI
- * sometimes prefixes valid JSON output with plugin/update warning lines.
+ * sometimes prefixes valid JSON output with plugin/update warning lines —
+ * if one of those lines itself contains a "{", the first one isn't
+ * necessarily where the real payload starts, so keep trying subsequent
+ * "{" occurrences until one actually parses.
  */
 function extractJson(text) {
   if (!text) return null;
-  const start = text.indexOf('{');
+  let start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1 || end < start) return null;
-  try {
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
+  while (start !== -1 && start <= end) {
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      start = text.indexOf('{', start + 1);
+    }
   }
+  return null;
 }
 
-module.exports = { listSalesforceCliOrgs };
+module.exports = { listSalesforceCliOrgs, loginToNewOrgViaCli };

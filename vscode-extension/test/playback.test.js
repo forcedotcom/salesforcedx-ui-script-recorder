@@ -1,7 +1,7 @@
 jest.mock('fs')
 jest.mock('../ensure-playwright-config', () => ({ ensurePlaywrightConfig: jest.fn() }))
 jest.mock('../commands/results-viewer', () => ({ clearInProgress: jest.fn() }))
-jest.mock('../sf-cli', () => ({ listSalesforceCliOrgs: jest.fn() }))
+jest.mock('../sf-cli', () => ({ listSalesforceCliOrgs: jest.fn(), loginToNewOrgViaCli: jest.fn() }))
 
 const path = require('path')
 
@@ -18,6 +18,7 @@ let fs
 let ensurePlaywrightConfig
 let clearInProgress
 let listSalesforceCliOrgs
+let loginToNewOrgViaCli
 let register
 
 const flush = () => new Promise((resolve) => setImmediate(resolve))
@@ -28,7 +29,7 @@ beforeEach(() => {
   fs = require('fs')
   ;({ ensurePlaywrightConfig } = require('../ensure-playwright-config'))
   ;({ clearInProgress } = require('../commands/results-viewer'))
-  ;({ listSalesforceCliOrgs } = require('../sf-cli'))
+  ;({ listSalesforceCliOrgs, loginToNewOrgViaCli } = require('../sf-cli'))
   ;({ register } = require('../commands/playback'))
 
   vscode.workspace.workspaceFolders = [{ uri: { fsPath: WORKSPACE } }]
@@ -158,6 +159,10 @@ describe('playbackScript command — setup and parameter parsing', () => {
   })
 
   it('renders no user CSV dropdown options when none exist, and an option per file when they do', async () => {
+    // The user-credentials CSV picker only renders for scripts with recorded
+    // credential params — a script with none would show the CLI org picker
+    // instead (see the "CLI org listing" describe block below).
+    fs.readFileSync.mockImplementation((p) => (p === SPEC_PATH ? "config.get('username')" : ''))
     const { panel: emptyPanel } = await openForm()
     expect(emptyPanel.webview.html).not.toContain('data-value="users.csv"')
 
@@ -165,6 +170,7 @@ describe('playbackScript command — setup and parameter parsing', () => {
     // spec path would just reveal the existing (stale) panel instead.
     const otherSpec = path.join(WORKSPACE, 'test-plans', 'playwright', 'other.spec.js')
     vscode.window.activeTextEditor = { document: { uri: { fsPath: otherSpec } } }
+    fs.readFileSync.mockImplementation((p) => (p === otherSpec ? "config.get('username')" : ''))
     fs.existsSync.mockImplementation((p) => p === USERS_DIR)
     fs.readdirSync.mockImplementation((p) => (p === USERS_DIR ? ['users.csv'] : []))
     const { panel: existsPanel } = await openForm()
@@ -189,14 +195,34 @@ describe('playbackScript command — setup and parameter parsing', () => {
 })
 
 describe('playbackScript command — CLI org listing', () => {
-  it('passes the resolved orgs to the form when listSalesforceCliOrgs succeeds', async () => {
+  it('shows the webview immediately with the org field in a loading state, before the org list resolves', () => {
+    listSalesforceCliOrgs.mockReturnValue(new Promise(() => {})) // never resolves
+    const handler = getHandler()
+
+    handler() // not awaited — the panel is created synchronously before any await point
+
+    const panel = vscode.window.createWebviewPanel.mock.results.at(-1).value
+    expect(panel.webview.html).toContain('Loading Salesforce CLI orgs')
+    expect(panel.webview.html).toContain('<div class="org-loading" id="org-loading">')
+    expect(panel.webview.html).toContain('<span class="spinner"></span>')
+    expect(panel.webview.html).toContain('<div class="multi-select" id="org-select" style="display: none;">')
+  })
+
+  it('posts the resolved orgs to the webview once listSalesforceCliOrgs succeeds', async () => {
     listSalesforceCliOrgs.mockResolvedValue([
       { username: 'user@org.com', alias: 'MyOrg', instanceUrl: 'https://org.my.salesforce.com' }
     ])
     const { panel } = await openForm()
 
-    expect(panel.webview.html).toContain('MyOrg')
-    expect(panel.webview.html).toContain('user@org.com')
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'orgsLoaded',
+      data: {
+        orgOptionsHtml: expect.stringContaining('MyOrg'),
+        orgMultiOptionsHtml: expect.stringContaining('MyOrg'),
+        error: null
+      }
+    })
+    expect(panel.webview.postMessage.mock.calls[0][0].data.orgOptionsHtml).toContain('user@org.com')
   })
 
   it('falls back to an org username label when no alias is present', async () => {
@@ -205,14 +231,197 @@ describe('playbackScript command — CLI org listing', () => {
     ])
     const { panel } = await openForm()
 
-    expect(panel.webview.html).toContain('plain@org.com')
+    expect(panel.webview.postMessage.mock.calls[0][0].data.orgOptionsHtml).toContain('plain@org.com')
   })
 
-  it('records the error message and shows no orgs when listSalesforceCliOrgs rejects', async () => {
+  it('posts the error message and no orgs to the webview when listSalesforceCliOrgs rejects', async () => {
     listSalesforceCliOrgs.mockRejectedValue(new Error('sf CLI not found'))
     const { panel } = await openForm()
 
-    expect(panel.webview.html).toContain('sf CLI not found')
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'orgsLoaded',
+      data: { orgOptionsHtml: '', orgMultiOptionsHtml: '', error: 'sf CLI not found' }
+    })
+  })
+
+  it('does not post the org update if the panel already resolved before the org list settles', async () => {
+    let resolveOrgs
+    listSalesforceCliOrgs.mockReturnValue(new Promise((resolve) => { resolveOrgs = resolve }))
+    const form = await openForm()
+
+    await finishRun(form, { params: {}, headed: true, org: null })
+    resolveOrgs([{ username: 'late@org.com', instanceUrl: 'https://late' }])
+    await flush()
+
+    expect(form.panel.webview.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not post the org update if the panel already resolved before the org list rejects', async () => {
+    let rejectOrgs
+    listSalesforceCliOrgs.mockReturnValue(new Promise((resolve, reject) => { rejectOrgs = reject }))
+    const form = await openForm()
+
+    await finishRun(form, { params: {}, headed: true, org: null })
+    rejectOrgs(new Error('late failure'))
+    await flush()
+
+    expect(form.panel.webview.postMessage).not.toHaveBeenCalled()
+  })
+
+  it('does not list or show the CLI org selector for a script with recorded credential params', async () => {
+    fs.readFileSync.mockImplementation((p) => (p === SPEC_PATH ? "config.get('username'); config.get('password');" : ''))
+    const { panel } = await openForm()
+
+    expect(listSalesforceCliOrgs).not.toHaveBeenCalled()
+    expect(panel.webview.html).not.toContain('id="org-field"')
+  })
+
+  it('lazily fetches CLI orgs on switchRecording the first time a script without credential params is opened', async () => {
+    const otherSpec = path.join(RECORDINGS_DIR, 'other.spec.js')
+    fs.readFileSync.mockImplementation((p) => (p === SPEC_PATH ? "config.get('username')" : ''))
+    fs.existsSync.mockImplementation((p) => p === otherSpec)
+    let resolveOrgs
+    listSalesforceCliOrgs.mockReturnValue(new Promise((resolve) => { resolveOrgs = resolve }))
+
+    const { onMessage, panel } = await openForm()
+    expect(listSalesforceCliOrgs).not.toHaveBeenCalled()
+    expect(panel.webview.html).not.toContain('id="org-field"')
+
+    onMessage({ type: 'switchRecording', data: 'other' })
+
+    expect(listSalesforceCliOrgs).toHaveBeenCalledTimes(1)
+    expect(panel.webview.html).toContain('Loading Salesforce CLI orgs')
+
+    resolveOrgs([{ username: 'user@org.com', instanceUrl: 'https://org' }])
+    await flush()
+
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'orgsLoaded',
+      data: {
+        orgOptionsHtml: expect.stringContaining('user@org.com'),
+        orgMultiOptionsHtml: expect.stringContaining('user@org.com'),
+        error: null
+      }
+    })
+  })
+
+  it('does not refetch CLI orgs when switching between recordings that both have no credential params', async () => {
+    const otherSpec = path.join(RECORDINGS_DIR, 'other.spec.js')
+    fs.existsSync.mockImplementation((p) => p === otherSpec)
+    const { onMessage } = await openForm()
+
+    expect(listSalesforceCliOrgs).toHaveBeenCalledTimes(1)
+
+    onMessage({ type: 'switchRecording', data: 'other' })
+
+    expect(listSalesforceCliOrgs).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('playbackScript command — login to another org', () => {
+  it('shows a "+ Login to another org" action item in both org dropdowns even before the org list resolves', () => {
+    listSalesforceCliOrgs.mockReturnValue(new Promise(() => {})) // never resolves
+    const handler = getHandler()
+
+    handler() // not awaited — the panel is created synchronously before any await point
+
+    const panel = vscode.window.createWebviewPanel.mock.results.at(-1).value
+    expect(panel.webview.html).toContain('org-login-btn')
+    expect(panel.webview.html).toContain('Login to another org')
+  })
+
+  it('renders a hidden "logging in" indicator alongside each org dropdown, ready to be shown once a login starts', async () => {
+    const { panel } = await openForm()
+
+    expect(panel.webview.html).toContain('<div class="org-loading" id="org-login-progress" style="display: none;">')
+    expect(panel.webview.html).toContain('<div class="org-loading" id="org-multi-login-progress" style="display: none;">')
+    expect(panel.webview.html).toContain('Logging in to new org…')
+  })
+
+  it('wraps the login call in a cancellable progress notification when the webview requests a new-org login', async () => {
+    loginToNewOrgViaCli.mockResolvedValueOnce({ username: 'new@org.com', alias: 'NewOrg', instanceUrl: 'https://new' })
+    const { onMessage } = await openForm()
+
+    onMessage({ type: 'loginToNewOrg' })
+    await flush()
+
+    expect(vscode.window.withProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining('Complete the login in your browser'),
+        cancellable: true
+      }),
+      expect.any(Function)
+    )
+    expect(loginToNewOrgViaCli).toHaveBeenCalledWith(expect.anything())
+  })
+
+  it('refetches the org list and marks the newly authenticated org selected/added on successful login', async () => {
+    loginToNewOrgViaCli.mockResolvedValueOnce({ username: 'new@org.com', alias: 'NewOrg', instanceUrl: 'https://new' })
+    const { onMessage, panel } = await openForm()
+    expect(listSalesforceCliOrgs).toHaveBeenCalledTimes(1)
+
+    listSalesforceCliOrgs.mockResolvedValueOnce([
+      { username: 'new@org.com', alias: 'NewOrg', instanceUrl: 'https://new' }
+    ])
+    onMessage({ type: 'loginToNewOrg' })
+    await flush()
+
+    expect(listSalesforceCliOrgs).toHaveBeenCalledTimes(2)
+    const lastPost = panel.webview.postMessage.mock.calls.at(-1)[0]
+    expect(lastPost.type).toBe('orgsLoaded')
+    expect(lastPost.data.newOrgUsername).toBe('new@org.com')
+    expect(lastPost.data.orgOptionsHtml).toContain('multi-select-option selected" data-value="new@org.com"')
+    expect(lastPost.data.orgMultiOptionsHtml).toContain('multi-select-option hidden" data-value="new@org.com"')
+  })
+
+  it('shows an error and notifies the webview when the new-org login fails with a message', async () => {
+    loginToNewOrgViaCli.mockRejectedValueOnce(new Error('Login cancelled.'))
+    const { onMessage, panel } = await openForm()
+
+    onMessage({ type: 'loginToNewOrg' })
+    await flush()
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Login cancelled.')
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({ type: 'orgLoginFailed' })
+  })
+
+  it('shows a default error message when the new-org login fails without one', async () => {
+    loginToNewOrgViaCli.mockRejectedValueOnce({})
+    const { onMessage } = await openForm()
+
+    onMessage({ type: 'loginToNewOrg' })
+    await flush()
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith('Salesforce UI Script Recorder: Login failed. Try again.')
+  })
+
+  it('does not post an org refresh if the panel already resolved before the new-org login settles', async () => {
+    let resolveLogin
+    loginToNewOrgViaCli.mockReturnValue(new Promise((resolve) => { resolveLogin = resolve }))
+    const form = await openForm()
+    form.onMessage({ type: 'loginToNewOrg' })
+    await finishRun(form, { params: {}, headed: true, org: null })
+    const callsBeforeLoginSettles = form.panel.webview.postMessage.mock.calls.length
+
+    resolveLogin({ username: 'late@org.com', instanceUrl: 'https://late' })
+    await flush()
+
+    expect(form.panel.webview.postMessage.mock.calls.length).toBe(callsBeforeLoginSettles)
+  })
+
+  it('does not post orgLoginFailed or show an error if the panel already resolved before the new-org login rejects', async () => {
+    let rejectLogin
+    loginToNewOrgViaCli.mockReturnValue(new Promise((resolve, reject) => { rejectLogin = reject }))
+    const form = await openForm()
+    form.onMessage({ type: 'loginToNewOrg' })
+    await finishRun(form, { params: {}, headed: true, org: null })
+    const callsBeforeLoginSettles = form.panel.webview.postMessage.mock.calls.length
+
+    rejectLogin(new Error('late failure'))
+    await flush()
+
+    expect(form.panel.webview.postMessage.mock.calls.length).toBe(callsBeforeLoginSettles)
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
   })
 })
 
@@ -352,7 +561,7 @@ describe('showPlaybackForm — webview messages', () => {
     const otherSpec = path.join(RECORDINGS_DIR, 'other.spec.js')
     fs.existsSync.mockImplementation((p) => p === RECORDINGS_DIR || p === otherSpec || p === USERS_DIR || p === DATA_DIR)
     fs.readFileSync.mockImplementation((p) => {
-      if (p === otherSpec) return "config.get('amount')"
+      if (p === otherSpec) return "config.get('username'); config.get('amount')"
       if (p === path.join(USERS_DIR, 'users.csv')) return 'username\nalice\n'
       if (p === path.join(DATA_DIR, 'data.csv')) return 'amount\n1\n'
       return ''
@@ -429,7 +638,7 @@ describe('showPlaybackForm — webview messages', () => {
 
     expect(panel.webview.html).toContain('id="bulk-content" class="mode-content active"')
     expect(panel.webview.html).toContain('data-value="data.csv"')
-    expect(panel.webview.html).toContain('org@x.com" selected')
+    expect(panel.webview.html).toContain('multi-select-option selected" data-value="org@x.com"')
   })
 
   it('clears the selected org when orgSelectionChange receives an empty value', async () => {
@@ -440,7 +649,7 @@ describe('showPlaybackForm — webview messages', () => {
     onMessage({ type: 'orgSelectionChange', data: '' })
     fireUsersWatcherChange()
 
-    expect(panel.webview.html).not.toContain('selected>X')
+    expect(panel.webview.html).not.toContain('multi-select-option selected')
   })
 
   it('generates a users CSV with the given filename and default credential columns', async () => {
@@ -550,6 +759,16 @@ describe('playbackScript command — single-mode run', () => {
 
     const task = vscode.tasks.executeTask.mock.calls[0][0]
     expect(task.execution.options.env.SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS).toBe('1')
+  })
+
+  it('extends PATH so npx resolves even under a non-interactive task shell', async () => {
+    const form = await openForm()
+
+    await finishRun(form, { params: {}, headed: true, org: null })
+
+    const task = vscode.tasks.executeTask.mock.calls[0][0]
+    expect(typeof task.execution.options.env.PATH).toBe('string')
+    expect(task.execution.options.env.PATH.length).toBeGreaterThan(0)
   })
 
   it('omits the headless env var when headed is true', async () => {
@@ -1083,7 +1302,7 @@ describe('getWebviewHtml — remaining rendering branches', () => {
 
   it('marks a selected user CSV file option and hides a selected data CSV option in bulk mode', async () => {
     fs.existsSync.mockImplementation((p) => p === USERS_DIR || p === DATA_DIR)
-    fs.readFileSync.mockImplementation((p) => (p === SPEC_PATH ? "config.get('amount')" : ''))
+    fs.readFileSync.mockImplementation((p) => (p === SPEC_PATH ? "config.get('username'); config.get('amount')" : ''))
     fs.readdirSync.mockImplementation((p) => {
       if (p === USERS_DIR) return ['users.csv']
       if (p === DATA_DIR) return ['data.csv']
@@ -1101,7 +1320,11 @@ describe('getWebviewHtml — remaining rendering branches', () => {
 
   it('renders singular "1 user account loaded" when the selected user file has exactly one row', async () => {
     fs.existsSync.mockImplementation((p) => p === USERS_DIR)
-    fs.readFileSync.mockImplementation((p) => (p === path.join(USERS_DIR, 'users.csv') ? 'username\nalice\n' : ''))
+    fs.readFileSync.mockImplementation((p) => {
+      if (p === SPEC_PATH) return "config.get('username')"
+      if (p === path.join(USERS_DIR, 'users.csv')) return 'username\nalice\n'
+      return ''
+    })
     fs.readdirSync.mockImplementation((p) => (p === USERS_DIR ? ['users.csv'] : []))
     const { onMessage, panel } = await openForm()
 

@@ -11,7 +11,8 @@ const fs = require('fs');
 const path = require('path');
 const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
 const { clearInProgress } = require('./results-viewer');
-const { listSalesforceCliOrgs } = require('../sf-cli');
+const { listSalesforceCliOrgs, loginToNewOrgViaCli } = require('../sf-cli');
+const { getExtendedPath } = require('../resolve-node');
 
 // Session cache for parameter values (cleared when extension reloads)
 const paramCache = new Map();
@@ -132,18 +133,17 @@ function register(context) {
         }
       }
 
-      // List Salesforce CLI-authenticated orgs for the org selector — additive
-      // alongside username/password params, so users on orgs with 2FA/SSO can
-      // skip the login form entirely. Non-fatal if "sf" isn't installed: the
-      // selector just shows the error inline and playback falls back to
-      // credentials as before.
-      let availableOrgs = [];
-      let orgListError = null;
-      try {
-        availableOrgs = await listSalesforceCliOrgs();
-      } catch (err) {
-        orgListError = err.message;
-      }
+      // The CLI org selector is an alternative to the username/password login
+      // form, not an addition to it: a script with recorded credential params
+      // expects to fill them in, and logging the browser straight into an
+      // already-authenticated org session first would leave those steps with
+      // nothing to fill. Only list/offer CLI orgs for scripts with none.
+      // Non-fatal if "sf" isn't installed: the selector just shows the error
+      // inline. Kicked off here but NOT awaited — the webview opens
+      // immediately with the org field in a loading state and updates in
+      // place once this settles (org listing is a slow CLI cold-start).
+      const shouldOfferCliOrgs = credentialParams.length === 0;
+      const orgsPromise = shouldOfferCliOrgs ? listSalesforceCliOrgs() : Promise.resolve([]);
 
       const result = await showPlaybackForm(context, paramNames, cachedValues, {
         credentialParams,
@@ -159,8 +159,10 @@ function register(context) {
         dataDir,
         specPath,
         specFileName: path.basename(specPath),
-        availableOrgs,
-        orgListError,
+        availableOrgs: [],
+        orgListError: null,
+        orgsLoading: shouldOfferCliOrgs,
+        orgsPromise,
       });
       if (!result) return;
 
@@ -188,16 +190,18 @@ function register(context) {
       const playwrightArgs = ['playwright', 'test', specFileName];
       if (!headless) playwrightArgs.push('--headed');
 
-      // Same org, N sessions: every spawned Playwright process (single or
-      // bulk) resolves its own fresh frontdoor URL from this one org, so
-      // there's no shared/racing session state across parallel sessions.
+      // Each spawned Playwright process (single or bulk) resolves its own
+      // fresh frontdoor URL independently, even when multiple bulk sessions
+      // target the same org — so there's no shared/racing session state
+      // across parallel sessions regardless of how orgs are distributed.
       const selectedOrg = result.org || null;
 
       if (result.mode === 'bulk') {
         const { parallelCount, usersFile, dataFiles } = result;
 
-        // Parse user credentials CSV
-        const userRows = parseCsv(path.join(usersDir, usersFile));
+        // Parse user credentials CSV. CLI-org scripts have no credential
+        // params to fill from a CSV, so usersFile may legitimately be absent.
+        const userRows = usersFile ? parseCsv(path.join(usersDir, usersFile)) : [];
 
         // Parse and merge all selected data files
         const dataRows = [];
@@ -214,6 +218,13 @@ function register(context) {
         const userRowCount = userRows.length;
         const dataRowCount = dataRows.length;
 
+        // Orgs cycle across sessions the same way CSV rows do — multiple
+        // orgs picked in the bulk multi-select (CLI-org scripts only) map
+        // onto sessions round-robin. Falls back to the single-select org
+        // for single-run mode or scripts with credential params.
+        const selectedOrgsList = result.orgs && result.orgs.length > 0 ? result.orgs : (selectedOrg ? [selectedOrg] : []);
+        const orgListCount = selectedOrgsList.length;
+
         if (userRowCount > 0 && userRowCount < count) {
           vscode.window.showWarningMessage(
             `Salesforce UI Script Recorder: User file has ${userRowCount} row${userRowCount === 1 ? '' : 's'} but ${count} sessions requested — credentials will cycle.`
@@ -222,6 +233,11 @@ function register(context) {
         if (dataRowCount > 0 && dataRowCount < count) {
           vscode.window.showWarningMessage(
             `Salesforce UI Script Recorder: Data files have ${dataRowCount} row${dataRowCount === 1 ? '' : 's'} but ${count} sessions requested — data will cycle.`
+          );
+        }
+        if (orgListCount > 0 && orgListCount < count) {
+          vscode.window.showWarningMessage(
+            `Salesforce UI Script Recorder: ${orgListCount} org${orgListCount === 1 ? '' : 's'} selected but ${count} sessions requested — org assignment will cycle.`
           );
         }
 
@@ -237,7 +253,7 @@ function register(context) {
             SALESFORCE_UI_SCRIPT_RECORDER_BATCH_TIMESTAMP: batchTimestamp,
             SALESFORCE_UI_SCRIPT_RECORDER_SESSION_INDEX: String(i + 1),
             ...(headless && { SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS: '1' }),
-            ...(selectedOrg && { SALESFORCE_UI_SCRIPT_RECORDER_ORG: selectedOrg }),
+            ...(orgListCount > 0 && { SALESFORCE_UI_SCRIPT_RECORDER_ORG: selectedOrgsList[i % orgListCount] }),
           };
           const userRow = userRowCount > 0 ? userRows[i % userRowCount] : {};
           for (const [key, value] of Object.entries(userRow)) {
@@ -357,9 +373,12 @@ function resolveAuthState(workspacePath, specPath, username) {
 // Runs a playback command as a VS Code Task, which gives us proper process exit detection.
 // The onDone callback fires as soon as the process exits (success or failure).
 function runPlaybackTask(label, cwd, playwrightArgs, envVars, onDone) {
+  // Task shells run non-interactively (e.g. `zsh -l`, not `-i`), so shell
+  // startup files that set up Node (nvm/fnm/volta/homebrew) may never run.
+  // Extend PATH ourselves so `npx` resolves even then.
   const execution = new vscode.ShellExecution(`npx ${playwrightArgs.join(' ')}`, {
     cwd,
-    env: envVars,
+    env: { ...envVars, PATH: getExtendedPath() },
   });
 
   const task = new vscode.Task(
@@ -472,6 +491,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
     let selectedUserFile = null;
     let selectedDataFiles = [];
     let selectedOrg = null;
+    let selectedOrgs = [];
 
     function refreshPanel() {
       const freshUserCsvFiles = fs.existsSync(usersDir)
@@ -504,6 +524,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         selectedUserFile,
         selectedDataFiles,
         selectedOrg,
+        selectedOrgs,
         availableRecordings,
       });
     }
@@ -511,6 +532,54 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
     refreshPanel();
 
     let resolved = false;
+
+    // Tracks whether a CLI org fetch has ever been kicked off for this panel —
+    // register() only starts one up front when the initial spec has no
+    // credential params (see shouldOfferCliOrgs). switchRecording below kicks
+    // one off lazily, the first time the user switches to a spec that also
+    // has none, so it only ever runs once per panel.
+    let orgsFetchStarted = credentialParams.length === 0;
+
+    // newOrgUsername is only set after a "+ Login to another org" round trip
+    // (see the loginToNewOrg handler below) — it tells the client which org
+    // to auto-select once the refreshed list lands, since the multi-select's
+    // rendered markup has no other way to distinguish "just logged in" from
+    // "already selected earlier this session".
+    function attachOrgsPromise(promise, newOrgUsername) {
+      promise.then(
+        (orgs) => {
+          bulkOptions.availableOrgs = orgs;
+          bulkOptions.orgListError = null;
+          bulkOptions.orgsLoading = false;
+          if (!resolved) {
+            panel.webview.postMessage({
+              type: 'orgsLoaded',
+              data: {
+                orgOptionsHtml: buildOrgOptionsHtml(orgs, selectedOrg),
+                orgMultiOptionsHtml: buildOrgMultiOptionsHtml(orgs, selectedOrgs),
+                error: null,
+                newOrgUsername,
+              },
+            });
+          }
+        },
+        (err) => {
+          bulkOptions.availableOrgs = [];
+          bulkOptions.orgListError = err.message;
+          bulkOptions.orgsLoading = false;
+          if (!resolved) {
+            panel.webview.postMessage({
+              type: 'orgsLoaded',
+              data: { orgOptionsHtml: '', orgMultiOptionsHtml: '', error: err.message },
+            });
+          }
+        }
+      );
+    }
+
+    if (orgsFetchStarted) {
+      attachOrgsPromise(bulkOptions.orgsPromise);
+    }
 
     panel.webview.onDidReceiveMessage((message) => {
       if (message.type === 'run') {
@@ -545,6 +614,18 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
           activeMode = 'single';
           selectedUserFile = null;
           selectedDataFiles = [];
+          selectedOrgs = [];
+
+          // The initial fetch in register() only runs when the FIRST spec
+          // opened has no credential params. If the user switches to a spec
+          // that also has none but that fetch never ran, kick it off now.
+          if (newCredentialParams.length === 0 && !orgsFetchStarted) {
+            orgsFetchStarted = true;
+            bulkOptions.orgsLoading = true;
+            bulkOptions.availableOrgs = [];
+            bulkOptions.orgListError = null;
+            attachOrgsPromise(listSalesforceCliOrgs());
+          }
 
           // Re-render
           const freshUserCsvFiles = fs.existsSync(usersDir)
@@ -583,8 +664,10 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
             selectedUserFile,
             selectedDataFiles,
             selectedOrg,
+            selectedOrgs,
             availableOrgs: bulkOptions.availableOrgs,
             orgListError: bulkOptions.orgListError,
+            orgsLoading: bulkOptions.orgsLoading,
             availableRecordings,
           });
         }
@@ -614,6 +697,34 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         selectedUserFile = message.data;
       } else if (message.type === 'orgSelectionChange') {
         selectedOrg = message.data || null;
+      } else if (message.type === 'orgMultiSelectionChange') {
+        selectedOrgs = message.data || [];
+      } else if (message.type === 'loginToNewOrg') {
+        vscode.window
+          .withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: 'Salesforce UI Script Recorder: Complete the login in your browser…',
+              cancellable: true,
+            },
+            (progress, token) => loginToNewOrgViaCli(token)
+          )
+          .then(
+            (newOrg) => {
+              if (resolved) return;
+              selectedOrg = newOrg.username;
+              if (!selectedOrgs.includes(newOrg.username)) {
+                selectedOrgs = [...selectedOrgs, newOrg.username];
+              }
+              bulkOptions.orgsLoading = false;
+              attachOrgsPromise(listSalesforceCliOrgs(), newOrg.username);
+            },
+            (err) => {
+              if (resolved) return;
+              panel.webview.postMessage({ type: 'orgLoginFailed' });
+              vscode.window.showErrorMessage(err.message || 'Salesforce UI Script Recorder: Login failed. Try again.');
+            }
+          );
       } else if (message.type === 'generateUsersFile') {
         const filename = message.data?.filename || 'users.csv';
         // bulkOptions.credentialParams is always an array (set at the initial
@@ -678,22 +789,85 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
 // still truthy) for every f in dataCsvFiles - the "|| []" fallback on that
 // specific lookup has no reachable false case.
 function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}) {
-  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], selectedOrg = null, availableOrgs = [], orgListError = null, specFileName = '', hasResults = false, availableRecordings = [] } = bulkOptions;
+  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], selectedOrg = null, selectedOrgs = [], availableOrgs = [], orgListError = null, orgsLoading = false, specFileName = '', hasResults = false, availableRecordings = [] } = bulkOptions;
 
-  const orgOptions = availableOrgs
-    .map(
-      (o) => `<option value="${escapeHtml(o.username)}"${o.username === selectedOrg ? ' selected' : ''}>${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}</option>`
-    )
-    .join('');
+  // The CLI org selector only applies to scripts with no recorded
+  // credential params — see shouldOfferCliOrgs in register() for why the
+  // two are mutually exclusive. Single-run mode picks one org via the same
+  // single-select dropdown styling as the user-files picker below; bulk mode
+  // gets its own multi-select (orgMultiField) so sessions can cycle across
+  // several orgs instead.
+  const selectedOrgMatch = availableOrgs.find((o) => o.username === selectedOrg);
+  const selectedOrgLabel = selectedOrgMatch ? `${selectedOrgMatch.alias || selectedOrgMatch.username} — ${selectedOrgMatch.instanceUrl}` : 'Select an org...';
 
-  const orgField = `
+  // Always renders the full dropdown markup (even while loading, just
+  // hidden) so its click handlers can be wired once at page load and
+  // survive the async dropdown-contents update in orgsLoaded.
+  const orgField = credentialParams.length > 0
+    ? ''
+    : `
       <div class="field" id="org-field">
-        <label for="org-select">Salesforce CLI org <span class="hint">(optional — skips the login form, no credentials or MFA needed)</span></label>
-        <select id="org-select" class="recording-select" style="width: 100%; max-width: 350px;">
-          <option value="">None — use credentials below</option>
-          ${orgOptions}
-        </select>
+        <label for="org-select-trigger">Salesforce CLI org <span class="hint">Logged-in OAuth session managed by the Salesforce CLI</span></label>
+        ${orgsLoading ? `
+        <div class="org-loading" id="org-loading">
+          <span class="spinner"></span>
+          <span>Loading Salesforce CLI orgs…</span>
+        </div>` : ''}
+        <div class="org-loading" id="org-login-progress" style="display: none;">
+          <span class="spinner"></span>
+          <span>Logging in to new org…</span>
+        </div>
+        <div class="multi-select" id="org-select" style="${orgsLoading ? 'display: none;' : ''}">
+          <div class="multi-select-trigger" id="org-select-trigger">
+            <span class="multi-select-text${selectedOrg ? ' has-selection' : ''}">${escapeHtml(selectedOrgLabel)}</span>
+            <span class="multi-select-arrow"></span>
+          </div>
+          <div class="multi-select-dropdown" id="org-select-dropdown">
+            ${buildOrgOptionsHtml(availableOrgs, selectedOrg)}
+          </div>
+        </div>
         ${orgListError ? `<div class="field-error">${escapeHtml(orgListError)}</div>` : ''}
+      </div>`;
+
+  // Bulk mode's org picker: multiple orgs can be selected and are cycled
+  // across sessions round-robin (mirrors how CSV rows cycle for credential
+  // scripts). Always renders the full multi-select markup (even while
+  // loading, just hidden) so its click handlers can be wired once at page
+  // load and survive the async dropdown-contents update in orgsLoaded.
+  const orgMultiField = credentialParams.length > 0
+    ? ''
+    : `
+      <div class="field" id="org-multi-field">
+        <label for="org-multi-trigger">Salesforce CLI orgs <span class="hint">Logged-in OAuth sessions managed by the Salesforce CLI</span></label>
+        ${orgsLoading ? `
+        <div class="org-loading" id="org-multi-loading">
+          <span class="spinner"></span>
+          <span>Loading Salesforce CLI orgs…</span>
+        </div>` : ''}
+        <div class="org-loading" id="org-multi-login-progress" style="display: none;">
+          <span class="spinner"></span>
+          <span>Logging in to new org…</span>
+        </div>
+        <div class="multi-select" id="org-multi-select" style="${orgsLoading ? 'display: none;' : ''}">
+          <div class="chip-trigger" id="org-multi-trigger">
+            ${selectedOrgs.length > 0
+              ? selectedOrgs.map((o) => {
+                  const match = availableOrgs.find((a) => a.username === o);
+                  const label = match ? `${match.alias || match.username} — ${match.instanceUrl}` : o;
+                  return `<span class="chip" data-value="${escapeHtml(o)}">${escapeHtml(label)} <span class="chip-remove">&times;</span></span>`;
+                }).join('')
+              : '<span class="placeholder">Select an org…</span>'}
+            <span class="arrow"></span>
+          </div>
+          <div class="multi-select-dropdown" id="org-multi-dropdown">
+            ${buildOrgMultiOptionsHtml(availableOrgs, selectedOrgs)}
+          </div>
+        </div>
+        ${orgListError ? `<div class="field-error">${escapeHtml(orgListError)}</div>` : ''}
+        <div class="cycle-warning" id="org-cycle-warning" style="display: none;">
+          <span class="cycle-warning-icon">&#9888;</span>
+          <span id="org-cycle-warning-text"></span>
+        </div>
       </div>`;
 
   const credentialFields = credentialParams
@@ -959,6 +1133,10 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     .dropdown-create-btn:hover {
       background: rgba(55, 148, 255, 0.1);
     }
+    .dropdown-create-btn.disabled {
+      pointer-events: none;
+      opacity: 0.5;
+    }
     .wizard-overlay {
       position: fixed;
       inset: 0;
@@ -1110,6 +1288,25 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       font-size: 0.85em;
       color: #f44747;
       margin-top: 4px;
+    }
+    .org-loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9em;
+      color: var(--vscode-descriptionForeground);
+    }
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(55, 148, 255, 0.2);
+      border-top-color: var(--vscode-textLink-foreground, #3794ff);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
     .cycle-warning {
       display: flex;
@@ -1367,8 +1564,6 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
   </div>
 
   <div class="section">
-    ${orgField}
-
     <div class="mode-switch">
       <button id="mode-single" class="${activeMode === 'single' ? 'active' : ''}">&#9655; Single Run</button>
       <button id="mode-bulk" class="${activeMode === 'bulk' ? 'active' : ''}">&#9776; Bulk / Parallel</button>
@@ -1376,6 +1571,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 
     <div id="single-content" class="mode-content${activeMode === 'single' ? ' active' : ''}">
       <p class="description">Run the test once with the credentials and parameters below.</p>
+      ${orgField}
       ${paramNames.length > 0 ? `
         ${credentialFields}
         ${dataParams.length > 0 ? `
@@ -1389,6 +1585,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
         Run multiple sessions in parallel. Credentials and data are assigned per session from the CSV rows — if there are more sessions than rows, values cycle from the beginning.
       </p>
 
+      ${credentialParams.length > 0 ? `
       <div class="field">
         <label for="users-file-select">User credentials <span class="folder-badge" data-folder="user-files">&#128193; user-files/</span></label>
         <div class="multi-select" id="users-file-select">
@@ -1414,6 +1611,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
           <span id="user-cycle-warning-text"></span>
         </div>
       </div>
+      ` : orgMultiField}
 
       <div class="field">
         <label for="data-files-select">Custom parameter data <span class="folder-badge" data-folder="data-files">&#128193; data-files/</span></label>
@@ -1489,12 +1687,164 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 
     let mode = '${activeMode}';
 
-    const orgSelect = document.getElementById('org-select');
-    if (orgSelect) {
-      orgSelect.addEventListener('change', () => {
-        vscode.postMessage({ type: 'orgSelectionChange', data: orgSelect.value });
+    // Single-org custom dropdown (mirrors the user-files single-select
+    // styling). Uses event delegation on the dropdown, like the org
+    // multi-select below, since its options are replaced wholesale once the
+    // async org list resolves (see the orgsLoaded handler above).
+    const orgSelectTrigger = document.getElementById('org-select-trigger');
+    const orgSelectDropdown = document.getElementById('org-select-dropdown');
+    let selectedOrgValue = ${JSON.stringify(selectedOrg)};
+
+    // Guards against double-firing "+ Login to another org" while a login is
+    // already in flight — the flow can take a while (user has to finish it
+    // in the browser) and both org dropdowns share this one flag/button
+    // class since either can trigger it.
+    let orgLoginInProgress = false;
+
+    // Swaps each org dropdown out for a "Logging in…" spinner (same pattern
+    // as the "Loading Salesforce CLI orgs…" state) so there's a visible
+    // indicator in the panel itself for the whole round trip, not just the
+    // native VS Code progress toast — the login can take a while since the
+    // user has to finish it in the browser.
+    function setOrgLoginLoading(loading) {
+      const singleSelect = document.getElementById('org-select');
+      const singleProgress = document.getElementById('org-login-progress');
+      if (singleSelect && singleProgress) {
+        singleSelect.style.display = loading ? 'none' : '';
+        singleProgress.style.display = loading ? 'flex' : 'none';
+      }
+      const multiSelect = document.getElementById('org-multi-select');
+      const multiProgress = document.getElementById('org-multi-login-progress');
+      if (multiSelect && multiProgress) {
+        multiSelect.style.display = loading ? 'none' : '';
+        multiProgress.style.display = loading ? 'flex' : 'none';
+      }
+    }
+
+    function requestOrgLogin() {
+      if (orgLoginInProgress) return;
+      orgLoginInProgress = true;
+      document.querySelectorAll('.org-login-btn').forEach((btn) => btn.classList.add('disabled'));
+      setOrgLoginLoading(true);
+      vscode.postMessage({ type: 'loginToNewOrg' });
+    }
+
+    if (orgSelectTrigger && orgSelectDropdown) {
+      orgSelectTrigger.addEventListener('click', () => {
+        orgSelectDropdown.classList.toggle('open');
+      });
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#org-select')) {
+          orgSelectDropdown.classList.remove('open');
+        }
+      });
+      orgSelectDropdown.addEventListener('click', (e) => {
+        if (e.target.closest('.org-login-btn')) {
+          orgSelectDropdown.classList.remove('open');
+          requestOrgLogin();
+          return;
+        }
+        const opt = e.target.closest('.multi-select-option');
+        if (!opt) return;
+        selectedOrgValue = opt.dataset.value;
+        orgSelectDropdown.querySelectorAll('.multi-select-option').forEach((o) => {
+          o.classList.toggle('selected', o === opt);
+        });
+        const textEl = orgSelectTrigger.querySelector('.multi-select-text');
+        textEl.textContent = opt.dataset.label;
+        textEl.classList.add('has-selection');
+        orgSelectDropdown.classList.remove('open');
+        vscode.postMessage({ type: 'orgSelectionChange', data: selectedOrgValue });
+        validateForm();
       });
     }
+
+    window.addEventListener('message', (event) => {
+      const message = event.data;
+      if (message.type === 'orgLoginFailed') {
+        orgLoginInProgress = false;
+        document.querySelectorAll('.org-login-btn').forEach((btn) => btn.classList.remove('disabled'));
+        setOrgLoginLoading(false);
+        return;
+      }
+      if (message.type !== 'orgsLoaded') return;
+
+      orgLoginInProgress = false;
+      document.querySelectorAll('.org-login-btn').forEach((btn) => btn.classList.remove('disabled'));
+      setOrgLoginLoading(false);
+
+      const liveOrgSelect = document.getElementById('org-select');
+      const orgField = document.getElementById('org-field');
+      if (liveOrgSelect && orgField) {
+        const orgLoading = document.getElementById('org-loading');
+        if (orgLoading) orgLoading.remove();
+
+        liveOrgSelect.style.display = '';
+        const liveOrgDropdown = document.getElementById('org-select-dropdown');
+        if (liveOrgDropdown) {
+          liveOrgDropdown.innerHTML = message.data.orgOptionsHtml;
+          // After a "+ Login to another org" refresh, the server already
+          // marks the newly authenticated org "selected" in the rebuilt
+          // markup (see buildOrgOptionsHtml) — sync the trigger label/local
+          // state to match instead of leaving them pointed at the old org.
+          const newlySelected = liveOrgDropdown.querySelector('.multi-select-option.selected');
+          if (newlySelected && newlySelected.dataset.value !== selectedOrgValue) {
+            selectedOrgValue = newlySelected.dataset.value;
+            const textEl = orgSelectTrigger.querySelector('.multi-select-text');
+            textEl.textContent = newlySelected.dataset.label;
+            textEl.classList.add('has-selection');
+            validateForm();
+          }
+        }
+
+        let errorDiv = orgField.querySelector('.field-error');
+        if (message.data.error) {
+          if (!errorDiv) {
+            errorDiv = document.createElement('div');
+            errorDiv.className = 'field-error';
+            orgField.appendChild(errorDiv);
+          }
+          errorDiv.textContent = message.data.error;
+        } else if (errorDiv) {
+          errorDiv.remove();
+        }
+      }
+
+      const liveOrgMultiSelect = document.getElementById('org-multi-select');
+      const orgMultiField = document.getElementById('org-multi-field');
+      if (liveOrgMultiSelect && orgMultiField) {
+        const orgMultiLoading = document.getElementById('org-multi-loading');
+        if (orgMultiLoading) orgMultiLoading.remove();
+
+        liveOrgMultiSelect.style.display = '';
+        const liveOrgMultiDropdown = document.getElementById('org-multi-dropdown');
+        if (liveOrgMultiDropdown) {
+          liveOrgMultiDropdown.innerHTML = message.data.orgMultiOptionsHtml;
+          // Unlike the single-select, the multi-select's markup only marks
+          // options "hidden" (already chipped), not "selected" — so there's
+          // no way to detect the newly-logged-in org from the rebuilt HTML
+          // alone. The server tells us explicitly via newOrgUsername instead.
+          if (message.data.newOrgUsername && !orgSelected.includes(message.data.newOrgUsername)) {
+            orgSelected.push(message.data.newOrgUsername);
+            renderOrgChips();
+            updateOrgCycleWarning();
+            validateForm();
+          }
+        }
+
+        let multiErrorDiv = orgMultiField.querySelector('.field-error');
+        if (message.data.error) {
+          if (!multiErrorDiv) {
+            multiErrorDiv = document.createElement('div');
+            multiErrorDiv.className = 'field-error';
+            orgMultiField.insertBefore(multiErrorDiv, document.getElementById('org-cycle-warning'));
+          }
+          multiErrorDiv.textContent = message.data.error;
+        } else if (multiErrorDiv) {
+          multiErrorDiv.remove();
+        }
+      }
+    });
 
     // User file custom dropdown
     const usersTrigger = document.getElementById('users-select-trigger');
@@ -1549,6 +1899,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     if (parallelInput) {
       parallelInput.addEventListener('input', () => {
         updateCycleWarning();
+        updateOrgCycleWarning();
         validateForm();
       });
     }
@@ -1739,6 +2090,105 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       });
     }
 
+    // CLI org multi-select for bulk mode — selected orgs cycle across
+    // sessions round-robin. Uses event delegation on the dropdown (rather
+    // than per-option listeners) since its options are replaced wholesale
+    // once the async org list resolves (see the orgsLoaded handler above).
+    const orgTrigger = document.getElementById('org-multi-trigger');
+    const orgDropdown = document.getElementById('org-multi-dropdown');
+    let orgSelected = ${JSON.stringify(selectedOrgs)};
+
+    function renderOrgChips() {
+      if (!orgTrigger) return;
+      const chips = orgTrigger.querySelectorAll('.chip');
+      chips.forEach((c) => c.remove());
+      const placeholder = orgTrigger.querySelector('.placeholder');
+      if (orgSelected.length === 0) {
+        if (!placeholder) {
+          const ph = document.createElement('span');
+          ph.className = 'placeholder';
+          ph.textContent = 'Select an org…';
+          orgTrigger.insertBefore(ph, orgTrigger.querySelector('.arrow'));
+        }
+      } else {
+        if (placeholder) placeholder.remove();
+        const arrow = orgTrigger.querySelector('.arrow');
+        orgSelected.forEach((val) => {
+          const opt = orgDropdown?.querySelector('.multi-select-option[data-value="' + val + '"]');
+          const label = opt ? opt.dataset.label : val;
+          const chip = document.createElement('span');
+          chip.className = 'chip';
+          chip.dataset.value = val;
+          chip.innerHTML = label + ' <span class="chip-remove">&times;</span>';
+          orgTrigger.insertBefore(chip, arrow);
+        });
+      }
+      if (orgDropdown) {
+        orgDropdown.querySelectorAll('.multi-select-option').forEach((opt) => {
+          opt.classList.toggle('hidden', orgSelected.includes(opt.dataset.value));
+        });
+      }
+    }
+
+    function addOrg(val) {
+      if (!orgSelected.includes(val)) orgSelected.push(val);
+      renderOrgChips();
+      onOrgSelectionChange();
+    }
+
+    function removeOrg(val) {
+      orgSelected = orgSelected.filter((v) => v !== val);
+      renderOrgChips();
+      onOrgSelectionChange();
+    }
+
+    function onOrgSelectionChange() {
+      vscode.postMessage({ type: 'orgMultiSelectionChange', data: orgSelected });
+      updateOrgCycleWarning();
+      validateForm();
+    }
+
+    function updateOrgCycleWarning() {
+      const warningEl = document.getElementById('org-cycle-warning');
+      const warningText = document.getElementById('org-cycle-warning-text');
+      if (!warningEl) return;
+      const parallel = parseInt(parallelInput?.value, 10) || 0;
+      if (orgSelected.length > 0 && orgSelected.length < parallel) {
+        warningEl.style.display = 'flex';
+        warningText.textContent = parallel + ' sessions requested but only ' + orgSelected.length + ' org' + (orgSelected.length === 1 ? '' : 's') + ' selected — org assignment will cycle.';
+      } else {
+        warningEl.style.display = 'none';
+      }
+    }
+
+    if (orgTrigger && orgDropdown) {
+      orgTrigger.addEventListener('click', (e) => {
+        if (e.target.closest('.chip-remove')) {
+          const chip = e.target.closest('.chip');
+          if (chip) removeOrg(chip.dataset.value);
+          return;
+        }
+        orgDropdown.classList.toggle('open');
+      });
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('#org-multi-select')) {
+          orgDropdown.classList.remove('open');
+        }
+      });
+      orgDropdown.addEventListener('click', (e) => {
+        if (e.target.closest('.org-login-btn')) {
+          orgDropdown.classList.remove('open');
+          requestOrgLogin();
+          return;
+        }
+        const opt = e.target.closest('.multi-select-option');
+        if (opt) {
+          addOrg(opt.dataset.value);
+          orgDropdown.classList.remove('open');
+        }
+      });
+    }
+
     function setMode(newMode) {
       mode = newMode;
       modeSingleBtn.classList.toggle('active', mode === 'single');
@@ -1764,7 +2214,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 
     function validateForm() {
       if (mode === 'bulk') {
-        const hasUsers = selectedUserRows > 0;
+        const hasUsers = usersTrigger ? selectedUserRows > 0 : orgSelected.length > 0;
         let allParamsCovered = true;
         if (dataParamNames.length > 0) {
           const selectedOpts = getSelectedOptions();
@@ -1782,7 +2232,8 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       const allFilled = paramNames.every((name) => {
         return document.getElementById('param-' + name).value.trim() !== '';
       });
-      runBtn.disabled = !allFilled;
+      const hasOrg = orgSelectTrigger ? !!selectedOrgValue : true;
+      runBtn.disabled = !(allFilled && hasOrg);
     }
 
     function validateParallelInput() {
@@ -1816,12 +2267,13 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     updateParamCoverage();
     updateOverlapWarning();
     updateCycleWarning();
+    updateOrgCycleWarning();
     validateForm();
 
     runBtn.addEventListener('click', () => {
       if (runBtn.disabled) return;
       const headed = document.getElementById('headed-toggle').checked;
-      const org = orgSelect ? orgSelect.value || null : null;
+      const org = orgSelectTrigger ? (selectedOrgValue || null) : null;
       if (mode === 'single') {
         const params = {};
         paramNames.forEach((name) => {
@@ -1831,7 +2283,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
       } else {
         const parallelCount = document.getElementById('parallel-count').value;
         const usersFile = selectedUserFile;
-        vscode.postMessage({ type: 'run', data: { mode: 'bulk', parallelCount: parseInt(parallelCount, 10), usersFile, dataFiles: dataSelected, headed, org } });
+        vscode.postMessage({ type: 'run', data: { mode: 'bulk', parallelCount: parseInt(parallelCount, 10), usersFile, dataFiles: dataSelected, headed, org, orgs: orgSelected } });
       }
     });
 
@@ -2002,6 +2454,34 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
 
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Appended to both org dropdowns' option lists below. It's baked into the
+// same HTML that gets swapped in wholesale on every refresh (initial load
+// and post-login), rather than rendered as static sibling markup, so its
+// delegated click handler (added on the dropdown container, not the button
+// itself) keeps working after each innerHTML replacement.
+const ORG_LOGIN_BTN_HTML =
+  '<hr class="dropdown-divider" /><div class="dropdown-create-btn org-login-btn"><strong style="font-size: 1.2em;">+</strong>&thinsp;Login to another org</div>';
+
+function buildOrgOptionsHtml(availableOrgs, selectedOrg) {
+  return (
+    availableOrgs
+      .map(
+        (o) => `<label class="multi-select-option${o.username === selectedOrg ? ' selected' : ''}" data-value="${escapeHtml(o.username)}" data-label="${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}"><span>${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}</span></label>`
+      )
+      .join('') + ORG_LOGIN_BTN_HTML
+  );
+}
+
+function buildOrgMultiOptionsHtml(availableOrgs, selectedOrgs) {
+  return (
+    availableOrgs
+      .map(
+        (o) => `<label class="multi-select-option${selectedOrgs.includes(o.username) ? ' hidden' : ''}" data-value="${escapeHtml(o.username)}" data-label="${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}"><span>${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}</span></label>`
+      )
+      .join('') + ORG_LOGIN_BTN_HTML
+  );
 }
 
 module.exports = { register };
