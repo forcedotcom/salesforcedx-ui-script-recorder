@@ -318,6 +318,52 @@ describe('playbackScript command — CLI org listing', () => {
   })
 })
 
+describe('playbackScript command — org/recorded URL mismatch warning', () => {
+  it('embeds the recorded hostname and renders the mismatch-warning containers for a CLI-org script', async () => {
+    fs.readFileSync.mockImplementation((p) => (p === SPEC_PATH ? "page.goto('https://acme.my.salesforce.com/')" : ''))
+    const { panel } = await openForm()
+
+    expect(panel.webview.html).toContain('id="org-url-mismatch-warning"')
+    expect(panel.webview.html).toContain('id="org-multi-url-mismatch-warning"')
+    expect(panel.webview.html).toContain('const recordedOrgHostname = "acme.my.salesforce.com";')
+  })
+
+  it('embeds a null recorded hostname when the spec has no page.goto call', async () => {
+    const { panel } = await openForm()
+
+    expect(panel.webview.html).toContain('const recordedOrgHostname = null;')
+  })
+
+  it('includes a data-instance-url attribute on org options for client-side hostname comparison', async () => {
+    listSalesforceCliOrgs.mockResolvedValue([
+      { username: 'user@org.com', alias: 'MyOrg', instanceUrl: 'https://org.my.salesforce.com' }
+    ])
+    const { panel } = await openForm()
+
+    const post = panel.webview.postMessage.mock.calls[0][0]
+    expect(post.data.orgOptionsHtml).toContain('data-instance-url="https://org.my.salesforce.com"')
+    expect(post.data.orgMultiOptionsHtml).toContain('data-instance-url="https://org.my.salesforce.com"')
+  })
+
+  it('recomputes the recorded hostname when switching to a different recording', async () => {
+    const otherSpec = path.join(RECORDINGS_DIR, 'other.spec.js')
+    fs.existsSync.mockImplementation((p) => p === RECORDINGS_DIR || p === otherSpec)
+    fs.readFileSync.mockImplementation((p) => {
+      if (p === SPEC_PATH) return "page.goto('https://old.my.salesforce.com/')"
+      if (p === otherSpec) return "page.goto('https://new.my.salesforce.com/')"
+      return ''
+    })
+    fs.readdirSync.mockImplementation((p) => (p === RECORDINGS_DIR ? ['other.spec.js'] : []))
+    const { onMessage, panel } = await openForm()
+
+    expect(panel.webview.html).toContain('const recordedOrgHostname = "old.my.salesforce.com";')
+
+    onMessage({ type: 'switchRecording', data: 'other' })
+
+    expect(panel.webview.html).toContain('const recordedOrgHostname = "new.my.salesforce.com";')
+  })
+})
+
 describe('playbackScript command — login to another org', () => {
   it('shows a "+ Login to another org" action item in both org dropdowns even before the org list resolves', () => {
     listSalesforceCliOrgs.mockReturnValue(new Promise(() => {})) // never resolves

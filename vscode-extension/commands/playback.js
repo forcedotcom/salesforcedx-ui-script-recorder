@@ -29,6 +29,20 @@ function isCredentialParam(name) {
   return CREDENTIAL_PARAMS.has(name.toLowerCase());
 }
 
+// Pulls the hostname out of a spec's recorded `page.goto(...)` call, e.g.
+// "https://acme.my.salesforce.com/" -> "acme.my.salesforce.com" - used both
+// to locate a matching auth-state file and to warn when the org selected for
+// playback doesn't match the org the script was recorded against.
+function extractRecordedHostname(specContent) {
+  const gotoMatch = specContent.match(/page\.goto\(\s*['"`]([^'"`]+)['"`]/);
+  if (!gotoMatch) return null;
+  try {
+    return new URL(gotoMatch[1]).hostname;
+  } catch {
+    return null;
+  }
+}
+
 // True when playback-results/ contains at least one completed run whose folder
 // matches this spec (folders are named "<specName>---..." with a results.json,
 // or "<specName>---...---BULK/" with session subfolders).
@@ -92,6 +106,7 @@ function register(context) {
 
       // Parse spec file for config.get('...') parameters
       const specContent = fs.readFileSync(specPath, 'utf-8');
+      const recordedHostname = extractRecordedHostname(specContent);
       const paramMatches = [...specContent.matchAll(/config\.get\(['"]([^'"]+)['"]\)/g)];
       const paramNames = [...new Set(paramMatches.map((m) => m[1]))];
 
@@ -159,6 +174,7 @@ function register(context) {
         dataDir,
         specPath,
         specFileName: path.basename(specPath),
+        recordedHostname,
         availableOrgs: [],
         orgListError: null,
         orgsLoading: shouldOfferCliOrgs,
@@ -345,15 +361,8 @@ function resolveAuthState(workspacePath, specPath, username) {
   if (!fs.existsSync(authDir)) return null;
 
   const specContent = fs.readFileSync(specPath, 'utf-8');
-  const gotoMatch = specContent.match(/page\.goto\(\s*['"`]([^'"`]+)['"`]/);
-  if (!gotoMatch) return null;
-
-  let hostname;
-  try {
-    hostname = new URL(gotoMatch[1]).hostname;
-  } catch {
-    return null;
-  }
+  const hostname = extractRecordedHostname(specContent);
+  if (!hostname) return null;
 
   const sanitizedUsername = username.replace(/[/\\:*?"<>|]/g, '_');
   const fileName = `${hostname}---${sanitizedUsername}.json`;
@@ -596,6 +605,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
         if (fs.existsSync(newSpecPath)) {
           // Rebuild context for new spec in-place
           const newSpecContent = fs.readFileSync(newSpecPath, 'utf-8');
+          const newRecordedHostname = extractRecordedHostname(newSpecContent);
           const newParamMatches = [...newSpecContent.matchAll(/config\.get\(['"]([^'"]+)['"]\)/g)];
           const newParamNames = [...new Set(newParamMatches.map((m) => m[1]))];
           const newCredentialParams = newParamNames.filter((n) => isCredentialParam(n));
@@ -608,6 +618,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
           bulkOptions.specFileName = newSpecFileName;
           bulkOptions.credentialParams = newCredentialParams;
           bulkOptions.dataParams = newDataParams;
+          bulkOptions.recordedHostname = newRecordedHostname;
           paramNames.length = 0;
           paramNames.push(...newParamNames);
           panel._specPath = newSpecPath;
@@ -653,6 +664,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
             dataDir,
             specPath: newSpecPath,
             specFileName: newSpecFileName,
+            recordedHostname: newRecordedHostname,
             userCsvFiles: freshUserCsvFiles,
             dataCsvFiles: freshDataCsvFiles,
             userCsvMeta: freshUserCsvMeta,
@@ -789,7 +801,7 @@ function showPlaybackForm(context, paramNames, cachedValues, bulkOptions = {}) {
 // still truthy) for every f in dataCsvFiles - the "|| []" fallback on that
 // specific lookup has no reachable false case.
 function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}) {
-  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], selectedOrg = null, selectedOrgs = [], availableOrgs = [], orgListError = null, orgsLoading = false, specFileName = '', hasResults = false, availableRecordings = [] } = bulkOptions;
+  const { credentialParams = [], dataParams = [], usersFileExists = false, dataFileExists = false, userCsvFiles = [], dataCsvFiles = [], userCsvMeta = {}, dataCsvMeta = {}, activeMode = 'single', selectedUserFile = null, selectedDataFiles = [], selectedOrg = null, selectedOrgs = [], availableOrgs = [], orgListError = null, orgsLoading = false, specFileName = '', hasResults = false, availableRecordings = [], recordedHostname = null } = bulkOptions;
 
   // The CLI org selector only applies to scripts with no recorded
   // credential params — see shouldOfferCliOrgs in register() for why the
@@ -827,6 +839,10 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
           </div>
         </div>
         ${orgListError ? `<div class="field-error">${escapeHtml(orgListError)}</div>` : ''}
+        <div class="cycle-warning" id="org-url-mismatch-warning" style="display: none;">
+          <span class="cycle-warning-icon">&#9888;</span>
+          <span id="org-url-mismatch-warning-text"></span>
+        </div>
       </div>`;
 
   // Bulk mode's org picker: multiple orgs can be selected and are cycled
@@ -867,6 +883,10 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
         <div class="cycle-warning" id="org-cycle-warning" style="display: none;">
           <span class="cycle-warning-icon">&#9888;</span>
           <span id="org-cycle-warning-text"></span>
+        </div>
+        <div class="cycle-warning" id="org-multi-url-mismatch-warning" style="display: none;">
+          <span class="cycle-warning-icon">&#9888;</span>
+          <span id="org-multi-url-mismatch-warning-text"></span>
         </div>
       </div>`;
 
@@ -1676,6 +1696,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     const dataParamNames = ${JSON.stringify(dataParams)};
     const existingUserFiles = ${JSON.stringify(userCsvFiles)};
     const existingDataFiles = ${JSON.stringify(dataCsvFiles)};
+    const recordedOrgHostname = ${JSON.stringify(recordedHostname)};
     const runBtn = document.getElementById('run-btn');
     const modeSingleBtn = document.getElementById('mode-single');
     const modeBulkBtn = document.getElementById('mode-bulk');
@@ -1694,6 +1715,28 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     const orgSelectTrigger = document.getElementById('org-select-trigger');
     const orgSelectDropdown = document.getElementById('org-select-dropdown');
     let selectedOrgValue = ${JSON.stringify(selectedOrg)};
+
+    // Warns (non-blocking — never disables Run) when the org selected for
+    // playback doesn't match the org the script was recorded against, using
+    // the same data-instance-url attribute the multi-select check below reads.
+    function updateOrgUrlMismatchWarning() {
+      const warningEl = document.getElementById('org-url-mismatch-warning');
+      const warningText = document.getElementById('org-url-mismatch-warning-text');
+      if (!warningEl) return;
+      const opt = selectedOrgValue && orgSelectDropdown
+        ? orgSelectDropdown.querySelector('.multi-select-option[data-value="' + selectedOrgValue + '"]')
+        : null;
+      let hostname = null;
+      if (opt && opt.dataset.instanceUrl) {
+        try { hostname = new URL(opt.dataset.instanceUrl).hostname; } catch {}
+      }
+      if (recordedOrgHostname && hostname && hostname !== recordedOrgHostname) {
+        warningEl.style.display = 'flex';
+        warningText.textContent = 'Selected org (' + hostname + ') does not match the URL this script was recorded against (' + recordedOrgHostname + ').';
+      } else {
+        warningEl.style.display = 'none';
+      }
+    }
 
     // Guards against double-firing "+ Login to another org" while a login is
     // already in flight — the flow can take a while (user has to finish it
@@ -1755,6 +1798,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
         textEl.classList.add('has-selection');
         orgSelectDropdown.classList.remove('open');
         vscode.postMessage({ type: 'orgSelectionChange', data: selectedOrgValue });
+        updateOrgUrlMismatchWarning();
         validateForm();
       });
     }
@@ -1795,6 +1839,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
             textEl.classList.add('has-selection');
             validateForm();
           }
+          updateOrgUrlMismatchWarning();
         }
 
         let errorDiv = orgField.querySelector('.field-error');
@@ -1830,6 +1875,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
             updateOrgCycleWarning();
             validateForm();
           }
+          updateOrgMultiUrlMismatchWarning();
         }
 
         let multiErrorDiv = orgMultiField.querySelector('.field-error');
@@ -2098,6 +2144,33 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     const orgDropdown = document.getElementById('org-multi-dropdown');
     let orgSelected = ${JSON.stringify(selectedOrgs)};
 
+    // Bulk equivalent of updateOrgUrlMismatchWarning — flags if any selected
+    // org (they cycle across sessions) doesn't match the recorded URL.
+    function updateOrgMultiUrlMismatchWarning() {
+      const warningEl = document.getElementById('org-multi-url-mismatch-warning');
+      const warningText = document.getElementById('org-multi-url-mismatch-warning-text');
+      if (!warningEl) return;
+      if (!recordedOrgHostname || orgSelected.length === 0) {
+        warningEl.style.display = 'none';
+        return;
+      }
+      const mismatched = orgSelected.filter((val) => {
+        const opt = orgDropdown?.querySelector('.multi-select-option[data-value="' + val + '"]');
+        if (!opt || !opt.dataset.instanceUrl) return false;
+        try {
+          return new URL(opt.dataset.instanceUrl).hostname !== recordedOrgHostname;
+        } catch {
+          return false;
+        }
+      });
+      if (mismatched.length > 0) {
+        warningEl.style.display = 'flex';
+        warningText.textContent = mismatched.length + ' selected org' + (mismatched.length === 1 ? '' : 's') + ' does not match the URL this script was recorded against (' + recordedOrgHostname + ').';
+      } else {
+        warningEl.style.display = 'none';
+      }
+    }
+
     function renderOrgChips() {
       if (!orgTrigger) return;
       const chips = orgTrigger.querySelectorAll('.chip');
@@ -2145,6 +2218,7 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     function onOrgSelectionChange() {
       vscode.postMessage({ type: 'orgMultiSelectionChange', data: orgSelected });
       updateOrgCycleWarning();
+      updateOrgMultiUrlMismatchWarning();
       validateForm();
     }
 
@@ -2268,6 +2342,8 @@ function getWebviewHtml(paramNames, cachedValues = {}, iconUri, bulkOptions = {}
     updateOverlapWarning();
     updateCycleWarning();
     updateOrgCycleWarning();
+    updateOrgUrlMismatchWarning();
+    updateOrgMultiUrlMismatchWarning();
     validateForm();
 
     runBtn.addEventListener('click', () => {
@@ -2468,7 +2544,7 @@ function buildOrgOptionsHtml(availableOrgs, selectedOrg) {
   return (
     availableOrgs
       .map(
-        (o) => `<label class="multi-select-option${o.username === selectedOrg ? ' selected' : ''}" data-value="${escapeHtml(o.username)}" data-label="${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}"><span>${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}</span></label>`
+        (o) => `<label class="multi-select-option${o.username === selectedOrg ? ' selected' : ''}" data-value="${escapeHtml(o.username)}" data-label="${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}" data-instance-url="${escapeHtml(o.instanceUrl)}"><span>${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}</span></label>`
       )
       .join('') + ORG_LOGIN_BTN_HTML
   );
@@ -2478,7 +2554,7 @@ function buildOrgMultiOptionsHtml(availableOrgs, selectedOrgs) {
   return (
     availableOrgs
       .map(
-        (o) => `<label class="multi-select-option${selectedOrgs.includes(o.username) ? ' hidden' : ''}" data-value="${escapeHtml(o.username)}" data-label="${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}"><span>${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}</span></label>`
+        (o) => `<label class="multi-select-option${selectedOrgs.includes(o.username) ? ' hidden' : ''}" data-value="${escapeHtml(o.username)}" data-label="${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}" data-instance-url="${escapeHtml(o.instanceUrl)}"><span>${escapeHtml(o.alias || o.username)} — ${escapeHtml(o.instanceUrl)}</span></label>`
       )
       .join('') + ORG_LOGIN_BTN_HTML
   );
