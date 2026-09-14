@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     # Requires manual approval before any build/publish steps run.
     # Configure this environment under Settings > Environments and add
-    # required reviewers, plus the VSCE_PERSONAL_ACCESS_TOKEN and OVSX_PAT secrets.
+    # required reviewers, plus the VSCE_PERSONAL_ACCESS_TOKEN and IDEE_OVSX_PAT secrets.
     environment: publish
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
@@ -205,7 +205,7 @@ jobs:
       - name: Publish
         id: publish
         env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          OVSX_PAT: ${{ secrets.IDEE_OVSX_PAT }}
           VSIX_FILE: ${{ steps.validate.outputs.vsix_file }}
           PRE_RELEASE: ${{ needs.validate-release.outputs.pre_release }}
           DRY_RUN: ${{ needs.validate-release.outputs.dry_run }}
