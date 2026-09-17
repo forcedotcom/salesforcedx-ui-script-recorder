@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
 const { resolveNodePath } = require('../resolve-node');
+const { resolveCliPath } = require('../resolve-packaged-paths');
 const { listSalesforceCliOrgs, loginToNewOrgViaCli } = require('../sf-cli');
 
 /**
@@ -158,8 +159,8 @@ function register(context, outputChannel) {
         .slice(0, -5);
       const outputPath = path.join(recordingsDir, `recording_${timestamp}.json`);
 
-      const cliPath = path.resolve(__dirname, '..', '..', 'recorder-cli', 'bin', 'cli.js');
       const cliRoot = path.resolve(__dirname, '..', '..');
+      const cliPath = resolveCliPath(cliRoot);
       const authStatesDir = path.join(workspaceFolder.uri.fsPath, 'auth-states');
       const args = [cliPath, 'record', '--output', outputPath];
 

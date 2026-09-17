@@ -17,6 +17,13 @@ coverage/**
 recorder-cli/scripts/**
 recorder-cli/test/**
 vscode-extension/test/**
+
+# recorder-cli/src is superseded in the packaged VSIX by the pre-built
+# recorder-cli/dist/*.mjs bundles (see scripts/build-packaged-bundles.js).
+# reporter.js is the exception — ensure-playwright-config.js copies it
+# verbatim into the user's workspace at runtime, so it must ship as source.
+recorder-cli/src/**
+!recorder-cli/src/reporter.js
 auth-state.json
 design-doc.md
 package-lock.json

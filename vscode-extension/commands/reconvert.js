@@ -11,6 +11,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { resolveNodePath } = require('../resolve-node');
+const { resolveCliPath } = require('../resolve-packaged-paths');
 
 function register(context) {
   return vscode.commands.registerCommand(
@@ -43,7 +44,7 @@ function register(context) {
       }
 
       const cliRoot = path.resolve(__dirname, '..', '..');
-      const cliPath = path.resolve(cliRoot, 'recorder-cli', 'bin', 'cli.js');
+      const cliPath = resolveCliPath(cliRoot);
 
       const nodePath = resolveNodePath();
       const proc = spawn(nodePath, [cliPath, 'convert', jsonPath], {

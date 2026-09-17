@@ -7,6 +7,9 @@ jest.mock('fs', () => ({
 jest.mock('child_process', () => ({ spawn: jest.fn() }))
 jest.mock('../ensure-playwright-config', () => ({ ensurePlaywrightConfig: jest.fn(() => ({ created: false })) }))
 jest.mock('../resolve-node', () => ({ resolveNodePath: jest.fn(() => '/usr/bin/node') }))
+jest.mock('../resolve-packaged-paths', () => ({
+  resolveCliPath: jest.fn((root) => require('path').resolve(root, 'recorder-cli', 'bin', 'cli.js'))
+}))
 jest.mock('../sf-cli', () => ({ listSalesforceCliOrgs: jest.fn(), loginToNewOrgViaCli: jest.fn() }))
 
 const vscode = require('vscode')

@@ -4,6 +4,9 @@ jest.mock('fs', () => ({
   readFileSync: jest.fn(),
   writeFileSync: jest.fn()
 }))
+jest.mock('../resolve-packaged-paths', () => ({
+  resolveMcpServerPath: jest.fn((root) => require('path').join(root, 'mcp-server', 'index.js'))
+}))
 
 const vscode = require('vscode')
 const fs = require('fs')

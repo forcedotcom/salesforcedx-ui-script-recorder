@@ -9,6 +9,7 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
+const { resolveMcpServerPath } = require('../resolve-packaged-paths');
 
 /**
  * Resolve the Agentforce MCP settings path cross-platform.
@@ -60,7 +61,7 @@ function register(context) {
       const mcpServerEntry = {
         type: 'stdio',
         command: 'node',
-        args: [path.join(context.extensionPath, 'mcp-server', 'index.js')],
+        args: [resolveMcpServerPath(context.extensionPath)],
       };
 
       try {
