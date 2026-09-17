@@ -12,6 +12,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { ensurePlaywrightConfig } = require('./ensure-playwright-config');
 const { resolveNodePath } = require('./resolve-node');
+const { resolveCliPath } = require('./resolve-packaged-paths');
 
 const TRIGGER_DIR = '.salesforce-ui-script-recorder';
 const TRIGGER_FILE = 'trigger.json';
@@ -108,7 +109,7 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
     .slice(0, -5);
   const outputPath = args.output || path.join(recordingsDir, `recording_${timestamp}.json`);
 
-  const cliPath = path.resolve(context.extensionPath, 'recorder-cli', 'bin', 'cli.js');
+  const cliPath = resolveCliPath(context.extensionPath);
   const authStatesDir = args.saveAuth || path.join(workspaceRoot, 'auth-states');
   const cliArgs = [cliPath, 'record', '--url', args.url || 'about:blank', '--output', outputPath, '--save-auth', authStatesDir];
 
@@ -269,7 +270,7 @@ async function handleConvert(args, workspaceRoot, outputChannel, resultPath, con
     return;
   }
 
-  const cliPath = path.resolve(context.extensionPath, 'recorder-cli', 'bin', 'cli.js');
+  const cliPath = resolveCliPath(context.extensionPath);
   const cliArgs = [cliPath, 'convert', inputFile];
   if (args.output) cliArgs.push('--output', args.output);
   if (args.cloud) cliArgs.push('--cloud', args.cloud);
