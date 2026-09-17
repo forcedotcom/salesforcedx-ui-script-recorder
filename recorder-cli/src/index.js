@@ -19,6 +19,51 @@ import path from 'path'
 
 const browsers = { chromium }
 
+// Playwright's "channel not installed" error is distinct from other launch
+// failures (bad args, crashed browser, etc.) — only this one means "try the
+// next candidate" rather than "surface the real problem."
+const CHANNEL_NOT_INSTALLED = /is not found at/
+
+function ensurePinnedChromiumInstalled(browserType) {
+  // Must use the exact playwright version in our own node_modules — its
+  // pinned Chromium revision is the one this recorder was tested against.
+  const nodeRequire = createRequire(import.meta.url)
+  const playwrightPkgDir = path.dirname(nodeRequire.resolve('playwright/package.json'))
+  const playwrightCliPath = path.join(playwrightPkgDir, 'cli.js')
+  const chromiumPath = browserType.executablePath()
+
+  if (fs.existsSync(chromiumPath)) return
+
+  console.log(chalk.yellow(`  Chromium not found at: ${chromiumPath}`))
+  console.log(chalk.yellow('  Installing Chromium...'))
+  try {
+    execFileSync(process.execPath, [playwrightCliPath, 'install', 'chromium'], { stdio: 'inherit' })
+    console.log(chalk.green('  ✓ Chromium installed'))
+  } catch (e) {
+    throw new Error(`Failed to install Chromium: ${e.message}. Run "npx playwright install chromium" manually.`)
+  }
+}
+
+// Prefer the OS-installed Chrome/Edge (both Chromium-based, same CDP surface
+// we depend on) over Playwright's own managed Chromium build — using them
+// needs no download at all. Only fall back to the pinned/managed Chromium
+// (downloading it if missing) if neither system browser is present.
+async function launchWithBrowserFallback(browserType, attemptLaunch) {
+  for (const [channel, label] of [['chrome', 'system Google Chrome'], ['msedge', 'system Microsoft Edge']]) {
+    try {
+      const result = await attemptLaunch({ channel })
+      console.log(chalk.gray(`  Using ${label}`))
+      return result
+    } catch (err) {
+      if (!CHANNEL_NOT_INSTALLED.test(err.message)) throw err
+    }
+  }
+
+  ensurePinnedChromiumInstalled(browserType)
+  console.log(chalk.gray('  Using bundled Chromium'))
+  return attemptLaunch({})
+}
+
 export async function startRecording(options) {
   const {
     url,
@@ -45,24 +90,6 @@ export async function startRecording(options) {
   // Launch the browser — CDP isolated worlds require Chromium
   const browserType = browsers.chromium
 
-  // Ensure Chromium is installed using the bundled Playwright CLI
-  // (must match the exact playwright version in our node_modules)
-  const nodeRequire = createRequire(import.meta.url)
-  const playwrightPkgDir = path.dirname(nodeRequire.resolve('playwright/package.json'))
-  const playwrightCliPath = path.join(playwrightPkgDir, 'cli.js')
-  const chromiumPath = browserType.executablePath()
-
-  if (!fs.existsSync(chromiumPath)) {
-    console.log(chalk.yellow(`  Chromium not found at: ${chromiumPath}`))
-    console.log(chalk.yellow('  Installing Chromium...'))
-    try {
-      execFileSync(process.execPath, [playwrightCliPath, 'install', 'chromium'], { stdio: 'inherit' })
-      console.log(chalk.green('  ✓ Chromium installed'))
-    } catch (e) {
-      throw new Error(`Failed to install Chromium: ${e.message}. Run "npx playwright install chromium" manually.`)
-    }
-  }
-
   let browserInstance = null
   let context
   let page
@@ -82,18 +109,24 @@ export async function startRecording(options) {
     fs.mkdirSync(userDataDir, { recursive: true })
     console.log(chalk.gray(`  Profile dir: ${userDataDir}`))
 
-    context = await browserType.launchPersistentContext(userDataDir, {
-      headless: headless === true,
-      args: chromiumArgs,
-      permissions,
-      viewport: { width: parseInt(viewportWidth), height: parseInt(viewportHeight) }
-    })
+    context = await launchWithBrowserFallback(browserType, (channelOptions) =>
+      browserType.launchPersistentContext(userDataDir, {
+        ...channelOptions,
+        headless: headless === true,
+        args: chromiumArgs,
+        permissions,
+        viewport: { width: parseInt(viewportWidth), height: parseInt(viewportHeight) }
+      })
+    )
     page = context.pages()[0] || await context.newPage()
   } else {
-    browserInstance = await browserType.launch({
-      headless: headless === true,
-      args: chromiumArgs
-    })
+    browserInstance = await launchWithBrowserFallback(browserType, (channelOptions) =>
+      browserType.launch({
+        ...channelOptions,
+        headless: headless === true,
+        args: chromiumArgs
+      })
+    )
 
     // If an auth-state file exists, load it as storageState so device cookies
     // (sfdc_lv2) are present — this skips the identity verification screen
