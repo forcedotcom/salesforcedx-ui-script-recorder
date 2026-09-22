@@ -8,7 +8,7 @@ jest.mock('fs', () => ({
 
 const fs = require('fs')
 const path = require('path')
-const { ensurePlaywrightConfig, upgradeConfigScreenshot } = require('../ensure-playwright-config')
+const { ensurePlaywrightConfig, upgradeConfigScreenshot, upgradeConfigLegacyNames } = require('../ensure-playwright-config')
 
 describe('upgradeConfigScreenshot', () => {
   it('is a no-op when screenshot is already configured', () => {
@@ -30,6 +30,40 @@ describe('upgradeConfigScreenshot', () => {
 
     expect(changed).toBe(true)
     expect(result).toContain("    screenshot: 'only-on-failure',\n    viewport")
+  })
+})
+
+describe('upgradeConfigLegacyNames', () => {
+  it('is a no-op when no legacy names are present', () => {
+    const text = "const headless = process.env.SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS === '1'"
+
+    expect(upgradeConfigLegacyNames(text)).toEqual({ text, changed: false })
+  })
+
+  it('renames the pre-rename headless and auth-state env vars', () => {
+    const text = [
+      "const authStatePath = process.env.SF_UI_RECORDER_AUTH_STATE || ''",
+      "const headless = process.env.SF_UI_RECORDER_HEADLESS === '1'",
+    ].join('\n')
+
+    const { text: result, changed } = upgradeConfigLegacyNames(text)
+
+    expect(changed).toBe(true)
+    expect(result).toContain('SALESFORCE_UI_SCRIPT_RECORDER_AUTH_STATE')
+    expect(result).toContain('SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS')
+    expect(result).not.toContain('SF_UI_RECORDER_AUTH_STATE')
+    expect(result).not.toContain('SF_UI_RECORDER_HEADLESS')
+  })
+
+  it('renames the pre-rename .sf-ui-recorder directory references', () => {
+    const text = "outputDir: './.sf-ui-recorder/test-output',\nreporter: [['./.sf-ui-recorder/reporter.js']],"
+
+    const { text: result, changed } = upgradeConfigLegacyNames(text)
+
+    expect(changed).toBe(true)
+    expect(result).toBe(
+      "outputDir: './.salesforce-ui-script-recorder/test-output',\nreporter: [['./.salesforce-ui-script-recorder/reporter.js']],"
+    )
   })
 })
 
@@ -80,6 +114,21 @@ describe('ensurePlaywrightConfig', () => {
 
     expect(result).toEqual({ created: false, upgraded: false, path: configPath })
     expect(fs.writeFileSync).not.toHaveBeenCalled()
+  })
+
+  it('upgrades a pre-rename config so the headless env var actually takes effect', () => {
+    fs.existsSync.mockImplementation((p) => p === configPath)
+    fs.readFileSync.mockReturnValue(
+      "const headless = process.env.SF_UI_RECORDER_HEADLESS === '1'\n" +
+      "use: {\n  headless,\n  screenshot: 'only-on-failure',\n}"
+    )
+
+    const result = ensurePlaywrightConfig(workspaceRoot, extensionPath)
+
+    expect(result).toEqual({ created: false, upgraded: true, path: configPath })
+    const written = fs.writeFileSync.mock.calls.find((c) => c[0] === configPath)[1]
+    expect(written).toContain('SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS')
+    expect(written).not.toContain('SF_UI_RECORDER_HEADLESS')
   })
 
   it('swallows errors thrown while reading or upgrading an existing config', () => {
