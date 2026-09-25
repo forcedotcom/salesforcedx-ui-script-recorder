@@ -11,7 +11,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
-const { resolveNodePath } = require('../resolve-node');
+const { resolveNodePath, getExtendedPath } = require('../resolve-node');
 const { listSalesforceCliOrgs, loginToNewOrgViaCli } = require('../sf-cli');
 
 /**
@@ -222,6 +222,7 @@ function register(context, outputChannel) {
             const proc = spawn(nodePath, args, {
               cwd: cliRoot,
               stdio: ['ignore', 'pipe', 'pipe'],
+              env: { ...process.env, PATH: getExtendedPath() },
             });
 
             proc.stdout.on('data', (data) => outputChannel.append(data.toString()));
