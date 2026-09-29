@@ -9,7 +9,10 @@ jest.mock('fs', () => ({
 }))
 jest.mock('child_process', () => ({ spawn: jest.fn() }))
 jest.mock('../ensure-playwright-config', () => ({ ensurePlaywrightConfig: jest.fn(() => ({ created: false })) }))
-jest.mock('../resolve-node', () => ({ resolveNodePath: jest.fn(() => '/mock/node') }))
+jest.mock('../resolve-node', () => ({
+  resolveNodePath: jest.fn(() => '/mock/node'),
+  getExtendedPath: jest.fn(() => '/mock/extended/path')
+}))
 
 const vscode = require('vscode')
 const fs = require('fs')
@@ -334,6 +337,13 @@ describe('handleRecord (via command record)', () => {
     expect(outputChannel.appendLine).not.toHaveBeenCalledWith('[MCP] Created playwright.config.js in workspace')
   })
 
+  it('spawns with an extended PATH so the CLI can find "sf" even with a restricted extension-host PATH', () => {
+    runRecord({ output: OUTPUT_PATH }, [RECORDINGS_DIR])
+
+    const options = spawn.mock.calls[0][2]
+    expect(options.env.PATH).toBe('/mock/extended/path')
+  })
+
   it('derives a timestamped output path when args.output is omitted', () => {
     const { proc } = runRecord({}, [RECORDINGS_DIR])
 
@@ -554,6 +564,13 @@ describe('handleConvert (via command convert)', () => {
 
     const cliArgs = spawn.mock.calls[0][1]
     expect(cliArgs.join(' ')).not.toMatch(/--output|--cloud|--user|--team/)
+  })
+
+  it('spawns with an extended PATH so the CLI can find "sf" even with a restricted extension-host PATH', () => {
+    runConvert({ inputFile: 'recording.json' }, [INPUT_FILE])
+
+    const options = spawn.mock.calls[0][2]
+    expect(options.env.PATH).toBe('/mock/extended/path')
   })
 
   it('streams stdout/stderr to the output channel while running', () => {

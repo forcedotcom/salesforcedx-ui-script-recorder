@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { ensurePlaywrightConfig } = require('./ensure-playwright-config');
-const { resolveNodePath } = require('./resolve-node');
+const { resolveNodePath, getExtendedPath } = require('./resolve-node');
 
 const TRIGGER_DIR = '.salesforce-ui-script-recorder';
 const TRIGGER_FILE = 'trigger.json';
@@ -143,6 +143,7 @@ async function handleRecord(args, workspaceRoot, outputChannel, resultPath, cont
         const proc = spawn(nodePath, cliArgs, {
           cwd: workspaceRoot,
           stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, PATH: getExtendedPath() },
         });
 
         token.onCancellationRequested(() => proc.kill());
@@ -298,6 +299,7 @@ async function handleConvert(args, workspaceRoot, outputChannel, resultPath, con
         const proc = spawn(nodePath, cliArgs, {
           cwd: workspaceRoot,
           stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, PATH: getExtendedPath() },
         });
 
         proc.stdout.on('data', (data) => {

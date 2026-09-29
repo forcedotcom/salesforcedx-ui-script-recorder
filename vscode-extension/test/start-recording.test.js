@@ -6,7 +6,10 @@ jest.mock('fs', () => ({
 }))
 jest.mock('child_process', () => ({ spawn: jest.fn() }))
 jest.mock('../ensure-playwright-config', () => ({ ensurePlaywrightConfig: jest.fn(() => ({ created: false })) }))
-jest.mock('../resolve-node', () => ({ resolveNodePath: jest.fn(() => '/usr/bin/node') }))
+jest.mock('../resolve-node', () => ({
+  resolveNodePath: jest.fn(() => '/usr/bin/node'),
+  getExtendedPath: jest.fn(() => '/mock/extended/path')
+}))
 jest.mock('../sf-cli', () => ({ listSalesforceCliOrgs: jest.fn(), loginToNewOrgViaCli: jest.fn() }))
 
 const vscode = require('vscode')
@@ -389,8 +392,16 @@ describe('register — workspace and config setup', () => {
 
     expect(spawn).toHaveBeenCalledWith('/usr/bin/node', expect.arrayContaining([CLI_PATH, 'record']), {
       cwd: CLI_ROOT,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PATH: '/mock/extended/path' }
     })
+  })
+
+  it('spawns with an extended PATH so the CLI can find "sf" even with a restricted extension-host PATH', async () => {
+    await reachSpawn(() => mockManualLogin(''))
+
+    const options = spawn.mock.calls[0][2]
+    expect(options.env.PATH).toBe('/mock/extended/path')
   })
 
   it('writes the output path under the recordings directory with a timestamped filename', async () => {
