@@ -117,6 +117,226 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
     expect(changes[0].value).toBe('hello2')
   })
 
+  it('dedupes a rapid same-value change when only the transient CSS selector changed', async () => {
+    const stableAriaSelector = ['aria/Product Tag[role="textbox"]']
+    emit({
+      action: 'input',
+      selectors: [['#product-tag-before-input'], stableAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:17',
+      value: 'Scale Testing Eng'
+    })
+    emit({
+      action: 'keyup',
+      selectors: [['#product-tag-after-input'], stableAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:17',
+      value: 'Scale Testing Eng'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change' && step.tagName === 'INPUT')
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({
+      selectors: [['#product-tag-before-input'], stableAriaSelector],
+      value: 'Scale Testing Eng'
+    })
+    expect(changes[0].recordingTargetId).toBeUndefined()
+  })
+
+  it('dedupes a delayed duplicate change emitted immediately before its dropdown option click', async () => {
+    const firstEventTime = Date.now()
+    const stableAriaSelector = ['aria/Product Tag[role="textbox"]']
+    emit({
+      action: 'input',
+      eventTime: firstEventTime,
+      selectors: [['#product-tag-before-input'], stableAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:17',
+      value: 'Scale Testing Eng'
+    })
+    emit({
+      action: 'keyup',
+      eventTime: firstEventTime + 3185,
+      selectors: [['#product-tag-transient-state'], stableAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:17',
+      value: 'Scale Testing Eng'
+    })
+    emit({
+      action: 'click',
+      eventTime: firstEventTime + 3209,
+      selectors: [['#product-tag-option']],
+      tagName: 'SPAN'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change' && step.tagName === 'INPUT')
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0].selectors).toEqual([['#product-tag-before-input'], stableAriaSelector])
+  })
+
+  it('keeps separate changes when transient selectors share no stable alternative', async () => {
+    emit({
+      action: 'input',
+      selectors: [['#first-field'], ['aria/First field[role="textbox"]']],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:41',
+      value: 'same value'
+    })
+    emit({
+      action: 'keyup',
+      selectors: [['#second-field'], ['aria/Second field[role="textbox"]']],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:41',
+      value: 'same value'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change' && step.tagName === 'INPUT')
+
+    expect(changes).toHaveLength(2)
+  })
+
+  it('compares every segment of a multi-part selector alternative', async () => {
+    emit({
+      action: 'input',
+      selectors: [['x-field', '#first-input']],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:43',
+      value: 'same value'
+    })
+    emit({
+      action: 'keyup',
+      selectors: [['x-field', '#second-input']],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:43',
+      value: 'same value'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change' && step.tagName === 'INPUT')
+
+    expect(changes).toHaveLength(2)
+  })
+
+  it('does not collapse same-element changes across an intentional key sequence', async () => {
+    const stableAriaSelector = ['aria/Product Tag[role="textbox"]']
+    emit({
+      action: 'input',
+      selectors: [['#product-tag-before-input'], stableAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:42',
+      value: 'Scale Testing Eng'
+    })
+    emit({ action: 'keydown', key: 'Enter' })
+    emit({ action: 'keyup', key: 'Enter' })
+    emit({
+      action: 'keyup',
+      selectors: [['#product-tag-after-input'], stableAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:42',
+      value: 'Scale Testing Eng'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change' && step.tagName === 'INPUT')
+
+    expect(changes).toHaveLength(2)
+    expect(flow.steps.some((step) => step.type === 'keyDown' && step.key === 'Enter')).toBe(true)
+  })
+
+  it('dedupes the same element even when its duplicate change arrives after a pause', async () => {
+    const firstEventTime = Date.now()
+    const sharedAriaSelector = ['aria/Shared field[role="textbox"]']
+    emit({
+      action: 'input',
+      eventTime: firstEventTime,
+      selectors: [['#field-before'], sharedAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:23',
+      value: 'same value'
+    })
+    emit({
+      action: 'keyup',
+      eventTime: firstEventTime + 501,
+      selectors: [['#field-after'], sharedAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:23',
+      value: 'same value'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change' && step.tagName === 'INPUT')
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0].selectors).toEqual([['#field-before'], sharedAriaSelector])
+  })
+
+  it('keeps distinct repeated-label elements even when value and fallback selector match', async () => {
+    const sharedAriaSelector = ['aria/Repeated field[role="textbox"]']
+    emit({
+      action: 'input',
+      selectors: [['#repeated-field-one'], sharedAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:31',
+      value: 'same value'
+    })
+    emit({
+      action: 'keyup',
+      selectors: [['#repeated-field-two'], sharedAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'frame-a:32',
+      value: 'same value'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change' && step.tagName === 'INPUT')
+
+    expect(changes).toHaveLength(2)
+    expect(changes[1].selectors).toEqual([['#repeated-field-two'], sharedAriaSelector])
+  })
+
+  it('does not borrow selectors across different control shapes', async () => {
+    const sharedSelector = ['aria/Shared editor[role="textbox"]']
+    emit({
+      action: 'input',
+      selectors: [['#plain-input'], sharedSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      value: 'same value'
+    })
+    emit({
+      action: 'input',
+      selectors: [['#rich-textarea'], sharedSelector],
+      tagName: 'TEXTAREA',
+      inputType: 'textarea',
+      value: 'same value'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change')
+
+    expect(changes).toHaveLength(2)
+    expect(changes[1].selectors).toEqual([['#rich-textarea'], sharedSelector])
+  })
+
   it('handles special-key keyDown/keyUp pairing, Tab-triggered change, and plain keys with no value', async () => {
     emit({ action: 'keydown', key: 'Enter' })
     emit({ action: 'keyup', key: 'Enter' })

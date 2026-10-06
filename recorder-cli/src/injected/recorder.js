@@ -33,6 +33,8 @@ const recordingControls = {
   GET_SCREENSHOT: 'GET_SCREENSHOT',
 }
 
+const POINTER_SNAPSHOT_MAX_AGE_MS = 2000
+
 export class Recorder {
   constructor({ state, sendMessage }) {
     this._eventLog = []
@@ -42,6 +44,10 @@ export class Recorder {
     this._state = state
     this._sendMessageFn = sendMessage
     this._debounceTimer = null
+    this._pointerDownSnapshot = null
+    this._recordingTargetIds = new WeakMap()
+    this._recordingTargetIdPrefix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    this._nextRecordingTargetId = 1
   }
 
   init() {
@@ -62,6 +68,12 @@ export class Recorder {
   _addAllListeners(events) {
     const boundedRecordEvent = this._recordEvent.bind(this)
     const debouncedRecordEvent = this._debounceRecordEvent.bind(this)
+    const capturePointerDown = this._capturePointerDown.bind(this)
+
+    // A component can replace the pressed option before the browser dispatches
+    // click, causing click.target to become a shared ancestor. Capture the
+    // selector while the original pointer target is still in the DOM.
+    window.addEventListener('pointerdown', capturePointerDown, true)
 
     events.forEach(type => {
       if (type === eventsToRecord.INPUT || type === eventsToRecord.KEYUP || type === eventsToRecord.KEYDOWN) {
@@ -72,9 +84,84 @@ export class Recorder {
     })
   }
 
+  _capturePointerDown(e) {
+    if (!e?.isTrusted || e.isPrimary === false || e.button !== 0) return
+
+    this._pointerDownSnapshot = null
+
+    try {
+      const target = getClickableTargetFromEvent(e)
+      if (!target || !(target instanceof Element)) return
+
+      const selectors = getSelector(e, { dataAttribute: this._state.dataAttribute }, target)
+      if (!selectors) return
+
+      let frameSelectors
+      if (window.self !== window.top) {
+        frameSelectors = this._getIframeSelectors(e, target)
+      }
+
+      const { parentSelectors, componentType } = this._getParentSelectors(e, target)
+      const rect = target.getBoundingClientRect()
+      const pointerPath = typeof e.composedPath === 'function'
+        ? e.composedPath().filter(element => element instanceof Element)
+        : [target]
+      if (!pointerPath.includes(target)) pointerPath.unshift(target)
+
+      this._pointerDownSnapshot = {
+        capturedAt: Date.now(),
+        pointerId: Number.isFinite(e.pointerId) ? e.pointerId : null,
+        button: e.button,
+        target,
+        pointerPath,
+        targetBounds: {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom
+        },
+        selectors,
+        frameSelectors,
+        parentSelectors,
+        componentType,
+        tagName: target.tagName,
+        inputType: target.type,
+        href: target.href || null
+      }
+    } catch (err) {
+      this._pointerDownSnapshot = null
+    }
+  }
+
+  _consumePointerDownSnapshot(e, currentTarget) {
+    const snapshot = this._pointerDownSnapshot
+    this._pointerDownSnapshot = null
+
+    if (!snapshot || e.type !== eventsToRecord.CLICK || e.detail === 0) return null
+
+    const age = Date.now() - snapshot.capturedAt
+    if (age < 0 || age > POINTER_SNAPSHOT_MAX_AGE_MS) return null
+    if (Number.isFinite(e.button) && e.button !== snapshot.button) return null
+    if (Number.isFinite(e.pointerId) && e.pointerId > 0 &&
+      snapshot.pointerId > 0 && e.pointerId !== snapshot.pointerId) return null
+
+    if (currentTarget !== snapshot.target) {
+      if (!snapshot.pointerPath.includes(currentTarget)) return null
+
+      const { left, top, right, bottom } = snapshot.targetBounds
+      if (![e.clientX, e.clientY, left, top, right, bottom].every(Number.isFinite)) return null
+      if (e.clientX < left || e.clientX >= right || e.clientY < top || e.clientY >= bottom) return null
+    }
+
+    return snapshot
+  }
+
   _debounceRecordEvent(e) {
     clearTimeout(this._debounceTimer)
-    this._debounceTimer = setTimeout(() => this._recordEvent(e), 0)
+    // Native composedPath() is cleared after dispatch. Resolve the deep target
+    // now so deferred input/key events do not collapse to a shadow host.
+    const target = getClickableTargetFromEvent(e) || e.target
+    this._debounceTimer = setTimeout(() => this._recordEvent(e, target), 0)
   }
 
   _sendMessage(msg) {
@@ -89,21 +176,27 @@ export class Recorder {
     }
   }
 
-  _recordEvent(e) {
+  _recordEvent(e, capturedTarget) {
     // Only record user-initiated actions
     if (!e.isTrusted) return
+
+    const currentTarget = capturedTarget || getClickableTargetFromEvent(e) || e.target
+    const pointerSnapshot = e.type === eventsToRecord.CLICK
+      ? this._consumePointerDownSnapshot(e, currentTarget)
+      : null
+    const target = pointerSnapshot?.target || currentTarget
 
     // Assert mode: next click captures an assertion, then resets
     if ((e.type === 'click' || e.type === 'dblclick') && this._state.assertNextClick) {
       e.preventDefault()
       e.stopPropagation()
 
-      const selectors = getSelector(e, { dataAttribute: this._state.dataAttribute })
+      const selectors = pointerSnapshot?.selectors ||
+        getSelector(e, { dataAttribute: this._state.dataAttribute }, target)
       if (!selectors) return // stay armed — element wasn't selectable
 
       this._state.assertNextClick = false
 
-      const target = e.target
       const directText = Array.from(target.childNodes)
         .filter(n => n.nodeType === 3)
         .map(n => n.textContent.trim())
@@ -129,9 +222,6 @@ export class Recorder {
     // Deduplicate by timestamp
     if (this._previousEvent && this._previousEvent.timeStamp === e.timeStamp) return
 
-    // In the ISOLATED world, event.target IS the deep target — no retargeting
-    const target = e.target
-
     // Skip certain input events that are handled by change
     if (target.tagName === 'INPUT' &&
       ((target.role !== 'combobox' && e.type === 'input') ||
@@ -142,15 +232,16 @@ export class Recorder {
     this._previousEvent = e
 
     try {
-      let iframeSelectors
-      if (window.self !== window.top) {
-        iframeSelectors = this._getIframeSelectors(e)
+      let iframeSelectors = pointerSnapshot?.frameSelectors
+      if (!pointerSnapshot && window.self !== window.top) {
+        iframeSelectors = this._getIframeSelectors(e, target)
       }
 
-      const selectors = getSelector(e, { dataAttribute: this._state.dataAttribute })
+      const selectors = pointerSnapshot?.selectors ||
+        getSelector(e, { dataAttribute: this._state.dataAttribute }, target)
       if (!selectors) return
 
-      const { parentSelectors, componentType } = this._getParentSelectors(e)
+      const { parentSelectors, componentType } = pointerSnapshot || this._getParentSelectors(e, target)
 
       // Flash the overlay to indicate a recorded event
       this._state.hasRecorded = true
@@ -161,34 +252,36 @@ export class Recorder {
         frameSelectors: iframeSelectors,
         parentSelectors,
         componentType,
-        value: this._getValue(e),
-        tagName: target.tagName,
-        inputType: target.type,
+        value: this._getValue(e, target),
+        tagName: pointerSnapshot ? pointerSnapshot.tagName : target.tagName,
+        inputType: pointerSnapshot ? pointerSnapshot.inputType : target.type,
         action: e.type,
         keyCode: e.keyCode || null,
-        href: target.href || null,
-        coordinates: this._getCoordinates(e),
+        href: pointerSnapshot ? pointerSnapshot.href : (target.href || null),
+        coordinates: pointerSnapshot
+          ? this._getPointerSnapshotCoordinates(e, pointerSnapshot, currentTarget)
+          : this._getCoordinates(e, target),
         eventTime: Date.now(),
         type: e.type,
-        key: e.key
+        key: e.key,
+        recordingTargetId: this._getRecordingTargetId(target)
       })
     } catch (err) {
       // Swallow errors from non-element events
     }
   }
 
-  _getParentSelectors(e) {
-    const element = e.target
+  _getParentSelectors(e, targetElement) {
+    const element = targetElement || e.target
     let parentSelectors = null
     let componentType = null
 
-    // In ISOLATED world, closest() works across open shadow DOM boundaries
-    const tableBody = element.closest('tbody')
+    const tableBody = this._closestAcrossShadowRoots(element, 'tbody')
     if (tableBody) {
       parentSelectors = getSelector(null, { dataAttribute: this._state.dataAttribute }, tableBody)
       componentType = 'table'
     } else {
-      const unorderedList = element.closest('ul')
+      const unorderedList = this._closestAcrossShadowRoots(element, 'ul')
       if (unorderedList) {
         parentSelectors = getSelector(null, { dataAttribute: this._state.dataAttribute }, unorderedList)
         componentType = 'list'
@@ -198,8 +291,22 @@ export class Recorder {
     return { parentSelectors, componentType }
   }
 
-  _getValue(e) {
-    const target = e.target
+  _closestAcrossShadowRoots(element, selector) {
+    let current = element
+
+    while (current instanceof Element) {
+      const match = current.closest(selector)
+      if (match) return match
+
+      const root = current.getRootNode()
+      current = root?.host instanceof Element ? root.host : null
+    }
+
+    return null
+  }
+
+  _getValue(e, targetElement) {
+    const target = targetElement || e.target
     if (target.type !== 'password') {
       return target.type === 'checkbox' || target.type === 'radio'
         ? target.checked
@@ -208,7 +315,19 @@ export class Recorder {
     return '******'
   }
 
-  _getCoordinates(evt) {
+  _getRecordingTargetId(target) {
+    if (!(target instanceof Element)) return null
+
+    let id = this._recordingTargetIds.get(target)
+    if (!id) {
+      id = `${this._recordingTargetIdPrefix}:${this._nextRecordingTargetId++}`
+      this._recordingTargetIds.set(target, id)
+    }
+
+    return id
+  }
+
+  _getCoordinates(evt, targetElement) {
     const eventsWithCoordinates = {
       mouseup: true,
       mousedown: true,
@@ -217,14 +336,25 @@ export class Recorder {
       click: true,
     }
 
-    const element = getClickableTargetFromEvent(evt)
+    const element = targetElement || getClickableTargetFromEvent(evt)
     const { offsetX, offsetY } = getMouseEventOffsets(evt, element)
 
     return eventsWithCoordinates[evt.type] ? { x: offsetX, y: offsetY } : null
   }
 
-  _getIframeSelectors(event) {
-    let ownerDocument = event.target.ownerDocument
+  _getPointerSnapshotCoordinates(evt, snapshot, currentTarget) {
+    if (currentTarget === snapshot.target) {
+      return this._getCoordinates(evt, snapshot.target)
+    }
+
+    return {
+      x: evt.clientX - snapshot.targetBounds.left,
+      y: evt.clientY - snapshot.targetBounds.top
+    }
+  }
+
+  _getIframeSelectors(event, targetElement) {
+    let ownerDocument = (targetElement || event.target).ownerDocument
     let frameSelectors = []
     let currentWindow = window
 

@@ -56,6 +56,23 @@ describe('FrameAction', () => {
     ])
   })
 
+  it('uses parent-scoped text for a positional list option inside a frame', () => {
+    const action = buildAction()
+    const result = action.handle({
+      type: 'click',
+      frameSelectors: ['#frame1'],
+      selectors: [['#field li:nth-child(3) span.option'], ['text/Scale Testing EngScale']],
+      parentSelectors: [['#field ul[role="listbox"]']],
+      componentType: 'list'
+    })
+
+    expect(result).toEqual([
+      "const frame0 = page.frameLocator('#frame1');",
+      'const frameAction0 = frame0.locator(\'#field ul[role="listbox"] >> :text("Scale Testing EngScale")\');',
+      'await frameAction0.click()'
+    ])
+  })
+
   it('delegates to ClickAction when there is no frame-scoped selector', () => {
     const action = buildAction()
     const result = action.handle({ type: 'click', frameSelectors: ['#frame1'] })

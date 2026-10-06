@@ -134,7 +134,7 @@ export async function startRecording(options) {
   // Inject the recorder into an ISOLATED world via CDP.
   // This matches how the Chrome extension content scripts work:
   // - Own copy of DOM APIs (unpatched by LWC)
-  // - event.target is NOT retargeted across open shadow DOM boundaries
+  // - composedPath() exposes deep open-shadow targets when event.target is retargeted
   // - No interference from page-level JavaScript
   const cdpSession = await context.newCDPSession(page)
 
@@ -489,7 +489,7 @@ function generateUserFlow(events, options) {
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i]
-    const { action, selectors, value, href, keyCode, tagName, frameSelectors, parentSelectors, componentType, key, type, inputType, coordinates, title, tabId } = event
+    const { action, selectors, value, href, keyCode, tagName, frameSelectors, parentSelectors, componentType, key, type, inputType, coordinates, title, tabId, recordingTargetId } = event
 
     let delay = 0
     if (i === 0) {
@@ -599,6 +599,7 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
           })
@@ -611,6 +612,7 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
           })
@@ -628,6 +630,7 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
           })
@@ -645,6 +648,7 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
           })
@@ -660,6 +664,7 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
           })
@@ -687,7 +692,7 @@ function generateUserFlow(events, options) {
   }
 
   // Filter duplicate change steps
-  const filteredSteps = filterSteps(steps)
+  const filteredSteps = filterSteps(steps).map(({ recordingTargetId, ...step }) => step)
 
   return {
     title: `Recording - ${new Date().toISOString()}`,
@@ -779,12 +784,32 @@ function filterSteps(steps) {
     const step = steps[i]
 
     if (step.type === 'change') {
-      const isDuplicate = lastChangeIndex !== -1 &&
-        filteredSteps[lastChangeIndex]?.type === step.type &&
-        filteredSteps[lastChangeIndex]?.target === step.target &&
-        JSON.stringify(filteredSteps[lastChangeIndex]?.selectors) === JSON.stringify(step.selectors) &&
-        filteredSteps[lastChangeIndex]?.tagName === step.tagName &&
-        filteredSteps[lastChangeIndex]?.inputType === step.inputType
+      const previousChange = filteredSteps[lastChangeIndex]
+      const sameSelector = JSON.stringify(previousChange?.selectors) === JSON.stringify(step.selectors)
+      const sameFieldShape = lastChangeIndex !== -1 &&
+        previousChange?.type === step.type &&
+        previousChange?.target === step.target &&
+        previousChange?.tagName === step.tagName &&
+        previousChange?.inputType === step.inputType &&
+        JSON.stringify(previousChange?.frameSelectors) === JSON.stringify(step.frameSelectors) &&
+        previousChange?.frame === step.frame
+      const sameRecordedElement = previousChange?.recordingTargetId != null &&
+        previousChange.recordingTargetId === step.recordingTargetId
+      const isAdjacentChange = lastChangeIndex === filteredSteps.length - 1
+      const previousSelectorAlternatives = new Set(
+        (previousChange?.selectors || [])
+          .filter(selector => selector?.some(Boolean))
+          .map(selector => JSON.stringify(selector))
+      )
+      const hasStableSelectorAlternative = (step.selectors || [])
+        .filter(selector => selector?.some(Boolean))
+        .some(selector => previousSelectorAlternatives.has(JSON.stringify(selector)))
+      const isTransientSelectorDuplicate = sameFieldShape && !sameSelector &&
+        previousChange?.value === step.value &&
+        sameRecordedElement &&
+        isAdjacentChange &&
+        hasStableSelectorAlternative
+      const isDuplicate = (sameFieldShape && sameSelector) || isTransientSelectorDuplicate
       if (isDuplicate) {
         // Remove the previous change and any intermediate keyboard events after it
         filteredSteps.splice(lastChangeIndex)
@@ -792,7 +817,12 @@ function filterSteps(steps) {
       } else {
         lastChangeIndex = filteredSteps.length
       }
-      filteredSteps.push(step)
+      // When a component changes its DOM while typing, the earlier selector is
+      // the one that exists before replay fills the field. Keep it while taking
+      // the latest value and timing.
+      filteredSteps.push(isTransientSelectorDuplicate
+        ? { ...step, selectors: previousChange.selectors }
+        : step)
       continue
     }
 

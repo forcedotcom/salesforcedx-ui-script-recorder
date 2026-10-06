@@ -24,6 +24,22 @@ describe('getScriptBody', () => {
     expect(result).toBe("\nawait page.click('#btn');")
   })
 
+  it('converts a positional list option click to a parent-scoped Playwright text selector', () => {
+    const result = getScriptBody({
+      steps: [{
+        type: 'click',
+        selectors: [['#field li:nth-child(3) span.option'], ['text/Scale Testing EngScale']],
+        parentSelectors: [['#field ul[role="listbox"]']],
+        componentType: 'list'
+      }]
+    })
+
+    expect(result).toContain(
+      'await page.click(\'#field ul[role="listbox"] >> :text("Scale Testing EngScale")\');'
+    )
+    expect(result.split('\n').at(-1)).not.toContain('li:nth-child(3) span.option')
+  })
+
   it('dispatches a doubleClick step through ClickAction (which always emits a click call)', () => {
     const result = getScriptBody({ steps: [{ type: 'doubleClick', selectors: [['#btn']] }] })
     expect(result).toBe("\nawait page.click('#btn');")
@@ -77,6 +93,23 @@ describe('getScriptBody', () => {
         '\n'
       )
     )
+  })
+
+  it('keeps the stable list-option fallback when the click is inside a frame', () => {
+    const result = getScriptBody({
+      steps: [{
+        type: 'click',
+        frameSelectors: ['#frame1'],
+        selectors: [['#field li:nth-child(3) span.option'], ['text/Scale Testing EngScale']],
+        parentSelectors: [['#field ul[role="listbox"]']],
+        componentType: 'list'
+      }]
+    })
+
+    expect(result).toContain(
+      'frame0.locator(\'#field ul[role="listbox"] >> :text("Scale Testing EngScale")\')'
+    )
+    expect(result).not.toContain("locator('#field li:nth-child(3) span.option')")
   })
 
   it('routes change steps with frameSelectors through FrameAction', () => {

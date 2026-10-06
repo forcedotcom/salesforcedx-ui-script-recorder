@@ -33,6 +33,20 @@ describe('BaseAction', () => {
         "// tagName = \"A\", alternative selectors = ['#alt']"
       )
     })
+
+    it('keeps untrusted selector text on one comment line', () => {
+      const selector = ['#chosen']
+      const step = {
+        selectors: [selector, ['text/Safe label\nawait injected(); //'], ['text/Other\u2028line']]
+      }
+
+      const comment = action._buildCommentString(step, [], selector)
+
+      expect(comment).toBe(
+        "// alternative selectors = ['text/Safe label\\nawait injected(); //', 'text/Other\\u2028line']"
+      )
+      expect(comment.split(/\r\n|\r|\n|\u2028|\u2029/)).toHaveLength(1)
+    })
   })
 
   describe('_buildActionString', () => {

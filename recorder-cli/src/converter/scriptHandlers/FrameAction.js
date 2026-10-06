@@ -7,7 +7,7 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
 */
 
 import { BaseAction } from './BaseAction.js'
-import { ClickAction } from './ClickAction.js'
+import { ClickAction, preferScopedTextForFragileListClick } from './ClickAction.js'
 import { ChangeAction } from './ChangeAction.js'
 
 export class FrameAction extends BaseAction {
@@ -31,7 +31,8 @@ export class FrameAction extends BaseAction {
       frameActions.push(`const frame${this.frameCount} = ${frameLocatorString};`)
 
       if (step.type === 'click') {
-        const clickSelector = step.selectors?.find(selector => selector)
+        const replayStep = preferScopedTextForFragileListClick(step)
+        const clickSelector = replayStep.selectors?.find(selector => selector?.[0])?.[0]
         if (clickSelector) {
           const timeout = step?.timeout
           frameActions.push(`const frameAction${this.frameAction} = frame${this.frameCount}.locator('${clickSelector}');`)
