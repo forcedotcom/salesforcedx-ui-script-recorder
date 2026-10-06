@@ -35,6 +35,35 @@ export default defineConfig({
 })
 `;
 
+// Env var / directory names used before the "naming consistency" rename.
+// Configs scaffolded prior to that rename still reference these, and since
+// the old env var names are never set by the extension anymore, `headless`
+// in those configs permanently evaluates to false regardless of the
+// record/playback UI's headed/headless toggle.
+const LEGACY_NAME_REPLACEMENTS = [
+  [/SF_UI_RECORDER_AUTH_STATE/g, 'SALESFORCE_UI_SCRIPT_RECORDER_AUTH_STATE'],
+  [/SF_UI_RECORDER_HEADLESS/g, 'SALESFORCE_UI_SCRIPT_RECORDER_HEADLESS'],
+  [/\.sf-ui-recorder\b/g, '.salesforce-ui-script-recorder'],
+];
+
+/**
+ * Rename pre-rename env var / directory references to their current names.
+ * No-op if none of the legacy names are present.
+ *
+ * @param {string} configText - Current contents of playwright.config.js
+ * @returns {{ text: string, changed: boolean }}
+ */
+function upgradeConfigLegacyNames(configText) {
+  let text = configText;
+  let changed = false;
+  for (const [pattern, replacement] of LEGACY_NAME_REPLACEMENTS) {
+    const next = text.replace(pattern, replacement);
+    if (next !== text) changed = true;
+    text = next;
+  }
+  return { text, changed };
+}
+
 /**
  * Ensure an existing playwright.config.js captures screenshots on failure.
  *
@@ -74,8 +103,8 @@ function upgradeConfigScreenshot(configText) {
 /**
  * Ensure a playwright.config.js and the results reporter exist in the target directory.
  * If they don't exist, scaffold them. If they already exist, leave the config alone
- * (aside from ensuring failure screenshots are enabled) but always update the reporter
- * (it ships with the extension).
+ * (aside from ensuring failure screenshots are enabled and renaming any pre-rename env
+ * var / directory references) but always update the reporter (it ships with the extension).
  *
  * @param {string} workspaceRoot - The root directory of the user's workspace
  * @param {string} extensionPath - The extension's install directory
@@ -89,13 +118,14 @@ function ensurePlaywrightConfig(workspaceRoot, extensionPath) {
     fs.writeFileSync(configPath, PLAYWRIGHT_CONFIG_CONTENT, 'utf-8');
     configCreated = true;
   } else {
-    // Config predates (or omits) the failure-screenshot setting — upgrade it in
-    // place so the reporter has screenshots to copy into run folders.
+    // Config predates (or omits) the failure-screenshot setting, or still references
+    // pre-rename env var / directory names — upgrade it in place.
     try {
       const current = fs.readFileSync(configPath, 'utf-8');
-      const { text, changed } = upgradeConfigScreenshot(current);
-      if (changed) {
-        fs.writeFileSync(configPath, text, 'utf-8');
+      const legacyNames = upgradeConfigLegacyNames(current);
+      const screenshot = upgradeConfigScreenshot(legacyNames.text);
+      if (legacyNames.changed || screenshot.changed) {
+        fs.writeFileSync(configPath, screenshot.text, 'utf-8');
         configUpgraded = true;
       }
     } catch {
@@ -114,4 +144,4 @@ function ensurePlaywrightConfig(workspaceRoot, extensionPath) {
   return { created: configCreated, upgraded: configUpgraded, path: configPath };
 }
 
-module.exports = { ensurePlaywrightConfig, upgradeConfigScreenshot };
+module.exports = { ensurePlaywrightConfig, upgradeConfigScreenshot, upgradeConfigLegacyNames };
