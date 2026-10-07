@@ -118,7 +118,8 @@ describe('getScriptBody', () => {
     })
 
     expect(result).toContain("const frame0 = page.frameLocator('#frame1');")
-    expect(result).toContain("await frameAction0.fill('#inp', 'hi');")
+    expect(result).toContain("const frameAction0 = frame0.locator('#inp');")
+    expect(result).toContain("await frameAction0.fill('hi');")
   })
 
   it('does not route through FrameAction when frameSelectors are present but the type is not click/change', () => {

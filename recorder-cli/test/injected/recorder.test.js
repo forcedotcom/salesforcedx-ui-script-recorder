@@ -193,6 +193,101 @@ describe('Recorder', () => {
 
       host.remove()
     })
+
+    it.each([
+      ['Backspace', ''],
+      ['Enter', 'first line\nsecond line']
+    ])('keeps the contenteditable input value when trailing %s keyup fires', (key, value) => {
+      const { recorder, sendMessage } = makeRecorder()
+      const editor = document.createElement('div')
+      editor.id = 'description-editor'
+      editor.setAttribute('contenteditable', 'true')
+      editor.innerHTML = value ? '<p>first line<br>second line</p>' : '<p><br></p>'
+      getSelector.mockReturnValue([['#description-editor']])
+
+      recorder._debounceRecordEvent({
+        isTrusted: true,
+        type: 'input',
+        target: editor,
+        detail: 0,
+        timeStamp: 1
+      })
+      recorder._debounceRecordEvent({
+        isTrusted: true,
+        type: 'keyup',
+        target: editor,
+        key,
+        keyCode: key === 'Enter' ? 13 : 8,
+        timeStamp: 2
+      })
+      jest.runAllTimers()
+
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'input',
+        value,
+        isContentEditable: true
+      }))
+    })
+
+    it('suppresses the trailing keyup when Salesforce replaces the editor after input', () => {
+      const { recorder, sendMessage } = makeRecorder()
+      const originalEditor = document.createElement('div')
+      const replacementEditor = document.createElement('div')
+      originalEditor.id = 'description-editor-before'
+      replacementEditor.id = 'description-editor-after'
+      originalEditor.setAttribute('contenteditable', 'true')
+      replacementEditor.setAttribute('contenteditable', 'true')
+      originalEditor.innerHTML = '<p>first line<br>second line</p>'
+      replacementEditor.innerHTML = '<p>first line<br>second line</p>'
+      getSelector.mockImplementation((_event, _options, target) => [[`#${target.id}`]])
+
+      recorder._debounceRecordEvent({
+        isTrusted: true,
+        type: 'input',
+        target: originalEditor,
+        timeStamp: 1
+      })
+      recorder._debounceRecordEvent({
+        isTrusted: true,
+        type: 'keyup',
+        target: replacementEditor,
+        key: 'Enter',
+        keyCode: 13,
+        timeStamp: 2
+      })
+      jest.runAllTimers()
+
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'input',
+        selectors: [['#description-editor-before']],
+        value: 'first line\nsecond line'
+      }))
+    })
+
+    it('captures contenteditable input synchronously before a component can replace the editor', () => {
+      const { recorder, sendMessage } = makeRecorder()
+      const editor = document.createElement('div')
+      editor.id = 'description-editor'
+      editor.setAttribute('contenteditable', 'true')
+      editor.textContent = 'captured now'
+      getSelector.mockReturnValue([['#description-editor']])
+
+      recorder._debounceRecordEvent({
+        isTrusted: true,
+        type: 'input',
+        target: editor,
+        detail: 0,
+        timeStamp: 1
+      })
+
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'input',
+        value: 'captured now',
+        selectors: [['#description-editor']]
+      }))
+    })
   })
 
   describe('_capturePointerDown', () => {
@@ -520,16 +615,296 @@ describe('Recorder', () => {
       })
     })
 
-    it('deduplicates a repeated event that shares the same timeStamp as the previous one', () => {
+    it('deduplicates the same event object when it is delivered twice', () => {
       getSelector.mockReturnValue([['#target']])
       const { recorder, sendMessage } = makeRecorder()
       const target = document.createElement('button')
+      const event = { isTrusted: true, type: 'click', target, timeStamp: 100 }
 
-      recorder._recordEvent({ isTrusted: true, type: 'click', target, timeStamp: 100 })
+      recorder._recordEvent(event)
       sendMessage.mockClear()
-      recorder._recordEvent({ isTrusted: true, type: 'click', target, timeStamp: 100 })
+      recorder._recordEvent(event)
 
       expect(sendMessage).not.toHaveBeenCalled()
+    })
+
+    it('records distinct contenteditable input events that share a timeStamp', () => {
+      getSelector.mockReturnValue([['#description-editor']])
+      const { recorder, sendMessage } = makeRecorder()
+      const editor = document.createElement('div')
+      editor.setAttribute('contenteditable', 'true')
+      editor.textContent = 'first value'
+
+      recorder._recordEvent({ isTrusted: true, type: 'input', target: editor, timeStamp: 100 })
+      editor.textContent = 'second value'
+      recorder._recordEvent({ isTrusted: true, type: 'input', target: editor, timeStamp: 100 })
+
+      expect(sendMessage.mock.calls.map(([message]) => message.value)).toEqual([
+        'first value',
+        'second value'
+      ])
+    })
+
+    it.each(['radio', 'checkbox'])(
+      'suppresses the browser-forwarded %s click from a recorded label activation',
+      (inputType) => {
+        const { recorder, sendMessage } = makeRecorder()
+        const label = document.createElement('label')
+        const fauxControl = document.createElement('span')
+        const input = document.createElement('input')
+        fauxControl.id = `${inputType}-faux`
+        input.id = `${inputType}-input`
+        input.type = inputType
+        input.checked = true
+        label.append(input, fauxControl)
+        document.body.append(label)
+        getSelector.mockImplementation((_event, _options, target) => [[`#${target.id}`]])
+
+        recorder._recordEvent({
+          isTrusted: true,
+          type: 'click',
+          target: fauxControl,
+          detail: 1,
+          timeStamp: 100
+        })
+        recorder._recordEvent({
+          isTrusted: true,
+          type: 'click',
+          target: input,
+          detail: 0,
+          timeStamp: 100
+        })
+        recorder._recordEvent({
+          isTrusted: true,
+          type: 'change',
+          target: input,
+          timeStamp: 101
+        })
+
+        expect(sendMessage.mock.calls.map(([message]) => ({
+          action: message.action,
+          selectors: message.selectors,
+          value: message.value
+        }))).toEqual([
+          { action: 'click', selectors: [[`#${inputType}-faux`]], value: undefined },
+          { action: 'change', selectors: [[`#${inputType}-input`]], value: true }
+        ])
+
+        label.remove()
+      }
+    )
+
+    it('suppresses a forwarded input click for an external label association', () => {
+      const { recorder, sendMessage } = makeRecorder()
+      const label = document.createElement('label')
+      const fauxControl = document.createElement('span')
+      const input = document.createElement('input')
+      label.htmlFor = 'external-radio'
+      fauxControl.id = 'external-faux'
+      input.id = 'external-radio'
+      input.type = 'radio'
+      label.append(fauxControl)
+      document.body.append(label, input)
+      getSelector.mockImplementation((_event, _options, target) => [[`#${target.id}`]])
+
+      recorder._recordEvent({
+        isTrusted: true,
+        type: 'click',
+        target: fauxControl,
+        detail: 1,
+        timeStamp: 200
+      })
+      recorder._recordEvent({
+        isTrusted: true,
+        type: 'click',
+        target: input,
+        detail: 0,
+        timeStamp: 200
+      })
+
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'click',
+        selectors: [['#external-faux']]
+      }))
+
+      label.remove()
+      input.remove()
+    })
+
+    it('suppresses a forwarded input click when the faux control is inside an open shadow root', () => {
+      const { recorder, sendMessage } = makeRecorder()
+      const label = document.createElement('label')
+      const input = document.createElement('input')
+      const host = document.createElement('x-radio-faux')
+      const shadow = host.attachShadow({ mode: 'open' })
+      const fauxControl = document.createElement('span')
+      input.id = 'shadow-radio'
+      input.type = 'radio'
+      fauxControl.id = 'shadow-faux'
+      shadow.append(fauxControl)
+      label.append(input, host)
+      document.body.append(label)
+      getSelector.mockImplementation((_event, _options, target) => [[`#${target.id}`]])
+      let firstDispatchActive = true
+
+      recorder._recordEvent({
+        isTrusted: true,
+        type: 'click',
+        target: host,
+        detail: 1,
+        timeStamp: 210,
+        composedPath: () => firstDispatchActive
+          ? [fauxControl, shadow, host, label, document.body]
+          : []
+      }, fauxControl)
+      // Native Event.composedPath() is cleared once its dispatch completes.
+      firstDispatchActive = false
+      recorder._recordEvent({
+        isTrusted: true,
+        type: 'click',
+        target: input,
+        detail: 0,
+        timeStamp: 210,
+        composedPath: () => [input, label, document.body]
+      })
+
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'click',
+        selectors: [['#shadow-faux']]
+      }))
+
+      label.remove()
+    })
+
+    it('suppresses a forwarded input click when the label contains a slotted faux control', () => {
+      const { recorder, sendMessage } = makeRecorder()
+      const host = document.createElement('x-slotted-radio')
+      const shadow = host.attachShadow({ mode: 'open' })
+      const label = document.createElement('label')
+      const input = document.createElement('input')
+      const slot = document.createElement('slot')
+      const fauxControl = document.createElement('span')
+      input.id = 'slotted-radio'
+      input.type = 'radio'
+      slot.name = 'faux'
+      fauxControl.id = 'slotted-faux'
+      fauxControl.slot = 'faux'
+      label.append(input, slot)
+      shadow.append(label)
+      host.append(fauxControl)
+      document.body.append(host)
+      getSelector.mockImplementation((_event, _options, target) => [[`#${target.id}`]])
+
+      recorder._recordEvent({
+        isTrusted: true,
+        type: 'click',
+        target: fauxControl,
+        detail: 1,
+        timeStamp: 220,
+        composedPath: () => [fauxControl, slot, label, shadow, host, document.body]
+      }, fauxControl)
+      recorder._recordEvent({
+        isTrusted: true,
+        type: 'click',
+        target: host,
+        detail: 0,
+        timeStamp: 220,
+        composedPath: () => [input, label, shadow, host, document.body]
+      }, input)
+
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'click',
+        selectors: [['#slotted-faux']]
+      }))
+
+      host.remove()
+    })
+
+    it.each([
+      ['direct pointer activation', { detail: 1, timeStamp: 300 }, null],
+      ['keyboard activation', { detail: 0, timeStamp: 301 }, 'keyup'],
+      ['an unrelated same-timestamp click', { detail: 0, timeStamp: 302 }, 'click']
+    ])('keeps a radio click produced by %s', (_description, clickOverrides, previousType) => {
+      const { recorder, sendMessage } = makeRecorder()
+      const label = document.createElement('label')
+      const fauxControl = document.createElement('span')
+      const unrelated = document.createElement('button')
+      const input = document.createElement('input')
+      fauxControl.id = 'preserved-faux'
+      unrelated.id = 'unrelated-button'
+      input.id = 'preserved-radio'
+      input.type = 'radio'
+      label.append(input, fauxControl)
+      document.body.append(label, unrelated)
+      getSelector.mockImplementation((_event, _options, target) => [[`#${target.id}`]])
+
+      if (previousType) {
+        const previousTarget = previousType === 'click' ? unrelated : input
+        recorder._recordEvent({
+          isTrusted: true,
+          type: previousType,
+          target: previousTarget,
+          detail: previousType === 'click' ? 1 : 0,
+          timeStamp: clickOverrides.timeStamp
+        })
+        sendMessage.mockClear()
+      }
+
+      recorder._recordEvent({
+        isTrusted: true,
+        type: 'click',
+        target: input,
+        ...clickOverrides
+      })
+
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'click',
+        selectors: [['#preserved-radio']]
+      }))
+
+      label.remove()
+      unrelated.remove()
+    })
+
+    it('keeps a later detail-zero radio click after an earlier click on its label', () => {
+      const { recorder, sendMessage } = makeRecorder()
+      const label = document.createElement('label')
+      const fauxControl = document.createElement('span')
+      const input = document.createElement('input')
+      fauxControl.id = 'earlier-faux'
+      input.id = 'later-radio'
+      input.type = 'radio'
+      label.append(input, fauxControl)
+      document.body.append(label)
+      getSelector.mockImplementation((_event, _options, target) => [[`#${target.id}`]])
+
+      recorder._recordEvent({
+        isTrusted: true,
+        type: 'click',
+        target: fauxControl,
+        detail: 1,
+        timeStamp: 400
+      })
+      sendMessage.mockClear()
+      recorder._recordEvent({
+        isTrusted: true,
+        type: 'click',
+        target: input,
+        detail: 0,
+        timeStamp: 401
+      })
+
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'click',
+        selectors: [['#later-radio']]
+      }))
+
+      label.remove()
     })
 
     describe('INPUT change/input filtering', () => {
@@ -584,6 +959,62 @@ describe('Recorder', () => {
         recorder._recordEvent({ isTrusted: true, type: 'input', target, timeStamp: 1 })
 
         expect(sendMessage).toHaveBeenCalled()
+      })
+
+      it('records nested rich-text input against the contenteditable host', () => {
+        const { recorder, sendMessage } = makeRecorder()
+        const editor = document.createElement('div')
+        const paragraph = document.createElement('p')
+        editor.id = 'description-editor'
+        paragraph.id = 'description-paragraph'
+        editor.setAttribute('contenteditable', 'true')
+        paragraph.innerHTML = "Bob's description<br>second line"
+        editor.appendChild(paragraph)
+        getSelector.mockImplementation((_event, _options, target) => [[`#${target.id}`]])
+
+        recorder._recordEvent({
+          isTrusted: true,
+          type: 'input',
+          target: paragraph,
+          detail: 0,
+          timeStamp: 1
+        })
+
+        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+          selectors: [['#description-editor']],
+          value: "Bob's description\nsecond line",
+          tagName: 'DIV',
+          isContentEditable: true,
+          action: 'input'
+        }))
+      })
+
+      it('keeps a native input as the target when it is nested inside a contenteditable container', () => {
+        const { recorder, sendMessage } = makeRecorder()
+        const editor = document.createElement('div')
+        const input = document.createElement('input')
+        editor.id = 'outer-editor'
+        editor.setAttribute('contenteditable', 'true')
+        Object.defineProperty(editor, 'innerText', { value: 'outer editor text', configurable: true })
+        input.id = 'embedded-input'
+        input.value = 'native input value'
+        editor.appendChild(input)
+        getSelector.mockImplementation((_event, _options, target) => [[`#${target.id}`]])
+
+        recorder._recordEvent({
+          isTrusted: true,
+          type: 'change',
+          target: input,
+          timeStamp: 1
+        })
+
+        expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+          selectors: [['#embedded-input']],
+          value: 'native input value',
+          tagName: 'INPUT',
+          isContentEditable: false,
+          action: 'change'
+        }))
       })
     })
 
@@ -781,6 +1212,97 @@ describe('Recorder', () => {
       const target = document.createElement('input')
 
       expect(recorder._getValue({ target, detail: { value: 'from-detail' } })).toBe('from-detail')
+    })
+
+    it('returns visible multiline text from a nested contenteditable target', () => {
+      const { recorder } = makeRecorder()
+      const editor = document.createElement('div')
+      const paragraph = document.createElement('p')
+      editor.setAttribute('contenteditable', 'true')
+      paragraph.innerHTML = 'first line<br>second line'
+      editor.appendChild(paragraph)
+
+      expect(recorder._getValue({ target: paragraph, detail: 0 }, paragraph)).toBe('first line\nsecond line')
+    })
+
+    it.each([
+      ['adjacent paragraphs', '<p>a</p><p>b</p>', 'a\nb'],
+      ['adjacent divs', '<div>a</div><div>b</div>', 'a\nb'],
+      ['an intentional blank line', '<div>a</div><div><br></div><div>b</div>', 'a\n\nb'],
+      ['a trailing blank line', '<p>a</p><p><br></p>', 'a\n'],
+      ['two empty lines', '<div><br></div><div><br></div>', '\n'],
+      ['mixed inline breaks and blocks', 'a<br><br><div>b</div>', 'a\n\nb'],
+      ['nested inline formatting', '<p><span>Hello</span> <strong>world</strong></p>', 'Hello world'],
+      ['formatting whitespace around blocks', '<div>\n  <p>a</p>\n  <p>b</p>\n</div>', 'a\nb'],
+      ['hidden helper content', '<p>Hello<span hidden> secret</span><span style="display:none"> also hidden</span><span style="visibility:hidden"> invisible</span></p>', 'Hello']
+    ])('serializes %s into replay-stable fill text', (_name, html, expected) => {
+      const { recorder } = makeRecorder()
+      const editor = document.createElement('div')
+      editor.setAttribute('contenteditable', 'true')
+      editor.innerHTML = html
+
+      expect(recorder._getValue({ target: editor, detail: 0 }, editor)).toBe(expected)
+    })
+
+    it('normalizes an empty rich-text paragraph to an empty value', () => {
+      const { recorder } = makeRecorder()
+      const editor = document.createElement('div')
+      editor.setAttribute('contenteditable', 'true')
+      editor.innerHTML = '<p><br></p>'
+      Object.defineProperty(editor, 'innerText', { value: '\n', configurable: true })
+
+      expect(recorder._getValue({ target: editor, detail: 0 }, editor)).toBe('')
+    })
+
+    it('does not inherit contenteditable through a shadow-root boundary', () => {
+      const { recorder } = makeRecorder()
+      const host = document.createElement('div')
+      host.setAttribute('contenteditable', 'true')
+      Object.defineProperty(host, 'innerText', { value: 'outer editor text', configurable: true })
+      const shadow = host.attachShadow({ mode: 'open' })
+      const innerControl = document.createElement('input')
+      shadow.appendChild(innerControl)
+
+      expect(recorder._getValue({ target: innerControl, detail: 0 }, innerControl)).toBeUndefined()
+    })
+
+    it('does not treat a whitespace-padded contenteditable keyword as valid', () => {
+      const { recorder } = makeRecorder()
+      const target = document.createElement('div')
+      target.setAttribute('contenteditable', ' true ')
+      target.textContent = 'ordinary div text'
+
+      expect(recorder._getValue({ target, detail: 0 }, target)).toBeUndefined()
+    })
+
+    it('lets an invalid contenteditable=false keyword inherit from its editable parent', () => {
+      const { recorder } = makeRecorder()
+      const editor = document.createElement('div')
+      const invalidOverride = document.createElement('div')
+      const paragraph = document.createElement('p')
+      editor.setAttribute('contenteditable', 'true')
+      invalidOverride.setAttribute('contenteditable', ' false ')
+      paragraph.textContent = 'inherited editor text'
+      invalidOverride.appendChild(paragraph)
+      editor.appendChild(invalidOverride)
+
+      expect(recorder._getValue({ target: paragraph, detail: 0 }, paragraph)).toBe('inherited editor text')
+    })
+
+    it('uses the highest continuously editable ancestor as the editing host', () => {
+      const { recorder } = makeRecorder()
+      const outerEditor = document.createElement('div')
+      const nestedEditable = document.createElement('div')
+      const paragraph = document.createElement('p')
+      const outerSibling = document.createElement('div')
+      outerEditor.setAttribute('contenteditable', 'true')
+      nestedEditable.setAttribute('contenteditable', 'true')
+      paragraph.textContent = 'nested fragment'
+      outerSibling.textContent = 'outer suffix'
+      nestedEditable.appendChild(paragraph)
+      outerEditor.append(nestedEditable, outerSibling)
+
+      expect(recorder._getValue({ target: paragraph, detail: 0 }, paragraph)).toBe('nested fragment\nouter suffix')
     })
   })
 

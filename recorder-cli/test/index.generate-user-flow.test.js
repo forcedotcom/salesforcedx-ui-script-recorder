@@ -117,6 +117,93 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
     expect(changes[0].value).toBe('hello2')
   })
 
+  it('keeps the visible radio activation and state change after label forwarding is filtered', async () => {
+    const firstEventTime = Date.now()
+    const radioSelectors = [
+      ['div.changeRecordTypeRightColumn > div:nth-child(11) input[type="radio"]'],
+      ['aria/User Story[role="radio"]']
+    ]
+    emit({
+      action: 'click',
+      eventTime: firstEventTime,
+      selectors: [['div.changeRecordTypeRightColumn > div:nth-child(11) span.slds-radio--faux']],
+      tagName: 'SPAN',
+      recordingTargetId: 'frame-a:faux-radio'
+    })
+    emit({
+      action: 'change',
+      eventTime: firstEventTime + 5,
+      selectors: radioSelectors,
+      tagName: 'INPUT',
+      inputType: 'radio',
+      recordingTargetId: 'frame-a:native-radio',
+      value: true
+    })
+
+    const flow = await writtenUserFlow()
+    const interactionSteps = flow.steps.filter(step =>
+      step.tagName === 'SPAN' || step.inputType === 'radio'
+    )
+
+    expect(interactionSteps).toEqual([
+      expect.objectContaining({
+        type: 'click',
+        selectors: [['div.changeRecordTypeRightColumn > div:nth-child(11) span.slds-radio--faux']]
+      }),
+      expect.objectContaining({
+        type: 'change',
+        selectors: radioSelectors,
+        inputType: 'radio',
+        value: true,
+        duration: 5
+      })
+    ])
+  })
+
+  it('records an unchecked checkbox state', async () => {
+    emit({
+      action: 'change',
+      selectors: [['input#notifications']],
+      tagName: 'INPUT',
+      inputType: 'checkbox',
+      recordingTargetId: 'frame-a:checkbox',
+      value: false
+    })
+
+    const flow = await writtenUserFlow()
+
+    expect(flow.steps).toContainEqual(expect.objectContaining({
+      type: 'change',
+      selectors: [['input#notifications']],
+      inputType: 'checkbox',
+      value: false
+    }))
+  })
+
+  it('keeps a direct checkable click and its following state change', async () => {
+    const sharedSelectors = [['input[type="radio"]']]
+    emit({
+      action: 'click',
+      selectors: sharedSelectors,
+      tagName: 'INPUT',
+      inputType: 'radio',
+      recordingTargetId: 'frame-a:direct-radio'
+    })
+    emit({
+      action: 'change',
+      selectors: sharedSelectors,
+      tagName: 'INPUT',
+      inputType: 'radio',
+      recordingTargetId: 'frame-a:direct-radio',
+      value: true
+    })
+
+    const flow = await writtenUserFlow()
+    const radioSteps = flow.steps.filter(step => step.inputType === 'radio')
+
+    expect(radioSteps.map(({ type }) => type)).toEqual(['click', 'change'])
+  })
+
   it('dedupes a rapid same-value change when only the transient CSS selector changed', async () => {
     const stableAriaSelector = ['aria/Product Tag[role="textbox"]']
     emit({
@@ -258,6 +345,35 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
     expect(flow.steps.some((step) => step.type === 'keyDown' && step.key === 'Enter')).toBe(true)
   })
 
+  it('keeps generic-selector contenteditable changes on different fields across Tab', async () => {
+    const genericEditorSelector = ['div[contenteditable="true"]']
+    emit({
+      action: 'input',
+      selectors: [genericEditorSelector],
+      tagName: 'DIV',
+      isContentEditable: true,
+      recordingTargetId: 'frame-a:description',
+      value: 'Description value'
+    })
+    emit({ action: 'keydown', key: 'Tab' })
+    emit({ action: 'keyup', key: 'Tab' })
+    emit({
+      action: 'input',
+      selectors: [genericEditorSelector],
+      tagName: 'DIV',
+      isContentEditable: true,
+      recordingTargetId: 'frame-a:notes',
+      value: 'Notes value'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change' && step.isContentEditable)
+
+    expect(changes).toHaveLength(2)
+    expect(changes.map(({ value }) => value)).toEqual(['Description value', 'Notes value'])
+    expect(flow.steps.some((step) => step.type === 'keyDown' && step.key === 'Tab')).toBe(true)
+  })
+
   it('dedupes the same element even when its duplicate change arrives after a pause', async () => {
     const firstEventTime = Date.now()
     const sharedAriaSelector = ['aria/Shared field[role="textbox"]']
@@ -377,6 +493,79 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
     const inputChanges = flow.steps.filter((s) => s.type === 'change')
     expect(inputChanges).toHaveLength(1)
     expect(inputChanges[0]).toMatchObject({ tagName: 'TEXTAREA', value: 'multi-line text' })
+  })
+
+  it('records an explicitly marked contenteditable DIV input without admitting arbitrary DIV input', async () => {
+    emit({
+      action: 'input',
+      tagName: 'DIV',
+      isContentEditable: true,
+      value: "Bob's description\nsecond line",
+      selectors: [['#description-editor']]
+    })
+    emit({
+      action: 'input',
+      tagName: 'DIV',
+      value: 'arbitrary div input',
+      selectors: [['#ordinary-div']]
+    })
+
+    const flow = await writtenUserFlow()
+
+    const changes = flow.steps.filter((step) => step.type === 'change')
+    expect(changes).toEqual([expect.objectContaining({
+      selectors: [['#description-editor']],
+      tagName: 'DIV',
+      isContentEditable: true,
+      value: "Bob's description\nsecond line"
+    })])
+  })
+
+  it('keeps Description and Subject changes in the order they were filled', async () => {
+    emit({
+      action: 'input',
+      tagName: 'DIV',
+      isContentEditable: true,
+      value: 'Description first',
+      selectors: [['#description-editor']],
+      recordingTargetId: 'frame-a:description'
+    })
+    emit({
+      action: 'change',
+      tagName: 'INPUT',
+      inputType: 'text',
+      value: 'Subject second',
+      selectors: [['#subject']],
+      recordingTargetId: 'frame-a:subject'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change')
+
+    expect(changes).toHaveLength(2)
+    expect(changes.map(({ selectors, value }) => ({ selectors, value }))).toEqual([
+      { selectors: [['#description-editor']], value: 'Description first' },
+      { selectors: [['#subject']], value: 'Subject second' }
+    ])
+  })
+
+  it('records clearing an explicitly marked contenteditable editor', async () => {
+    emit({
+      action: 'input',
+      tagName: 'DIV',
+      isContentEditable: true,
+      value: '',
+      selectors: [['#description-editor']]
+    })
+
+    const flow = await writtenUserFlow()
+
+    expect(flow.steps).toContainEqual(expect.objectContaining({
+      type: 'change',
+      selectors: [['#description-editor']],
+      isContentEditable: true,
+      value: ''
+    }))
   })
 
   it('marks a raw NAVIGATION event with a new tabId as a new tab/window, distinct from the current one', async () => {

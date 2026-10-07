@@ -34,7 +34,8 @@ const stringOnlyRegex = /^[A-Za-z ()\-_[\]]+$/
 const nonNumberOnlyRegex = /.*[^\d].*/
 const interactiveSelector =
   'a, area[href], audio[controls], button, details, embed, iframe, input, label, object, ' +
-  'select, summary, textarea, video[controls], [contenteditable]:not([contenteditable="false" i]), ' +
+  'select, summary, textarea, video[controls], [contenteditable=""], [contenteditable="true" i], ' +
+  '[contenteditable="plaintext-only" i], ' +
   '[draggable="true"], [onclick], [tabindex], ' +
   '[role~="button"], [role~="checkbox"], [role~="combobox"], [role~="gridcell"], ' +
   '[role~="link"], [role~="listbox"], [role~="menuitem"], [role~="menuitemcheckbox"], ' +
@@ -44,6 +45,20 @@ const interactiveSelector =
 
 function hasUnwantedChars(text) {
   return text.includes(':') || text.includes(';')
+}
+
+function isContentEditableTarget(element) {
+  if (element?.isContentEditable === true) return true
+
+  const reflectedState = element?.contentEditable
+  if (reflectedState === 'true' || reflectedState === 'plaintext-only') return true
+  if (typeof reflectedState === 'string') return false
+
+  const attribute = element?.getAttribute?.('contenteditable')
+  if (attribute === '') return true
+  if (attribute === null || attribute === undefined) return false
+  const normalized = attribute.toLowerCase()
+  return normalized === 'true' || normalized === 'plaintext-only'
 }
 
 function checkForStringAndSpace(text) {
@@ -182,7 +197,8 @@ export function getSelector(e, { dataAttribute } = {}, targetElement) {
   if (element?.type !== 'password' &&
       element?.tagName !== 'INPUT' &&
       element?.tagName !== 'TEXTAREA' &&
-      element?.tagName !== 'SELECT') {
+      element?.tagName !== 'SELECT' &&
+      !isContentEditableTarget(element)) {
     textSelector = getTextSelector(element)
     if (!textSelector) {
       textSelector = getTextSelectorFromOptionAncestor(element)

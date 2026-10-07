@@ -7,6 +7,7 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
 */
 
 import { BaseAction } from './BaseAction.js'
+import { toJavaScriptStringLiteral } from './JavaScriptLiteral.js'
 
 // Track which credential variables have already been declared within a single conversion
 const declaredVars = new Set()
@@ -31,9 +32,9 @@ export class ChangeAction extends BaseAction {
         const paramAction = `let ${paramName} = config.get('${paramName}');`
         actions.splice(1, 0, paramAction)
         if (step.inputType === 'checkbox' || step.inputType === 'radio') {
-          actions[actions.length - 1] = `await ${this.context.page}.locator('${selector}').setChecked(${paramName} == "true");`
+          actions[actions.length - 1] = `await ${this.context.page}.locator(${toJavaScriptStringLiteral(selector)}).setChecked(${paramName} == "true");`
         } else {
-          actions[actions.length - 1] = `await ${this.context.page}.fill('${selector}', ${paramName});`
+          actions[actions.length - 1] = `await ${this.context.page}.fill(${toJavaScriptStringLiteral(selector)}, ${paramName});`
         }
       }
     }
@@ -55,13 +56,13 @@ export class ChangeAction extends BaseAction {
         actions.splice(1, 0, `const username = config.get('username');`)
         declaredVars.add('username')
       }
-      actions[actions.length - 1] = `await ${this.context.page}.fill('${selector}', username);`
+      actions[actions.length - 1] = `await ${this.context.page}.fill(${toJavaScriptStringLiteral(selector)}, username);`
     } else {
       if (!declaredVars.has('password')) {
         actions.splice(1, 0, `const password = config.get('password');`)
         declaredVars.add('password')
       }
-      actions[actions.length - 1] = `await ${this.context.page}.fill('${selector}', password);`
+      actions[actions.length - 1] = `await ${this.context.page}.fill(${toJavaScriptStringLiteral(selector)}, password);`
     }
   }
 }

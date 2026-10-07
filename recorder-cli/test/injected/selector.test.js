@@ -557,6 +557,26 @@ describe('getSelector', () => {
       expect(selectors.some((s) => s[0].startsWith('text/'))).toBe(false)
     })
 
+    it('excludes the changing text selector for a contenteditable editor', () => {
+      stubTextSelector('Description text changes while typing')
+      const target = el('div', { contenteditable: 'true' })
+      append(target)
+
+      const selectors = getSelector({ target }, {})
+
+      expect(selectors).toEqual([['#target']])
+    })
+
+    it('keeps a text selector when the contenteditable keyword is invalid', () => {
+      stubTextSelector('Ordinary visible text')
+      const target = el('div', { contenteditable: ' true ' })
+      append(target)
+
+      const selectors = getSelector({ target }, {})
+
+      expect(selectors).toContainEqual(['text/Ordinary visible text'])
+    })
+
     it('excludes the text selector for a password-type input', () => {
       stubTextSelector('should not appear')
       const target = el('input', { type: 'password' })

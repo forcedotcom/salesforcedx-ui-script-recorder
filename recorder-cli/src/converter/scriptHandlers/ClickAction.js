@@ -7,6 +7,7 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
 */
 
 import { BaseAction } from './BaseAction.js'
+import { toJavaScriptStringLiteral } from './JavaScriptLiteral.js'
 
 export function preferScopedTextForFragileListClick(step) {
   if (step.type !== 'click' || step.params?.parameterise || step.componentType !== 'list') {
@@ -29,26 +30,15 @@ export function preferScopedTextForFragileListClick(step) {
   // Playwright cannot execute directly. Scope Playwright's text engine to
   // the recorded list so the option remains stable when its row moves.
   const scopedTextSelector = `${parentSelector} >> :text(${JSON.stringify(text)})`
-  const escapedSelector = escapeSingleQuotedJavaScript(scopedTextSelector)
 
   return {
     ...step,
-    selectors: [[escapedSelector], ...step.selectors]
+    selectors: [[scopedTextSelector], ...step.selectors]
   }
 }
 
 function isCssSelector(selector) {
   return Boolean(selector) && !/^(aria|css|pierce|text|xpath)\//.test(selector)
-}
-
-function escapeSingleQuotedJavaScript(value) {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/\r/g, '\\r')
-    .replace(/\n/g, '\\n')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029')
 }
 
 export class ClickAction extends BaseAction {
@@ -92,7 +82,7 @@ export class ClickAction extends BaseAction {
     const varName = counterKey.replace('Counter', 'Selector')
 
     const selector = `
-const ${varName}${counter} = await ${this.context.page}.locator('${childSelector}').nth(${childIndex ?? 0})
+const ${varName}${counter} = await ${this.context.page}.locator(${toJavaScriptStringLiteral(childSelector)}).nth(${childIndex ?? 0})
 await ${varName}${counter}.click()
 `
     ClickAction.nthSelectorCounters[counterKey] += 1

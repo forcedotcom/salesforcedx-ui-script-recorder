@@ -97,6 +97,20 @@ describe('BaseAction', () => {
       )
     })
 
+    it('escapes rich-text values as a valid single-quoted JavaScript string', () => {
+      expect(
+        action._buildActionString(
+          { type: 'change', isContentEditable: true },
+          'fill',
+          '#editor[data-label="Owner\'s"]',
+          "Bob's\nsecond\\line\tend\u2028tail\u2029done",
+          { await: true, ending: ';' }
+        )
+      ).toBe(
+        "await page.fill('#editor[data-label=\"Owner\\'s\"]', 'Bob\\'s\\nsecond\\\\line\\tend\\u2028tail\\u2029done');"
+      )
+    })
+
     it('falls back to a plain action call for any other step type', () => {
       expect(action._buildActionString({ type: 'assert' }, 'someAction', 'sel', undefined, {})).toBe(
         "page.someAction('sel')"

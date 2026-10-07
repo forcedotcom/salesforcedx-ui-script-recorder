@@ -489,7 +489,11 @@ function generateUserFlow(events, options) {
 
   for (let i = 0; i < events.length; i++) {
     const event = events[i]
-    const { action, selectors, value, href, keyCode, tagName, frameSelectors, parentSelectors, componentType, key, type, inputType, coordinates, title, tabId, recordingTargetId } = event
+    const { action, selectors, value, href, keyCode, tagName, frameSelectors, parentSelectors, componentType, key, type, inputType, isContentEditable, coordinates, title, tabId, recordingTargetId } = event
+    const hasContentEditableValue = isContentEditable && value !== undefined && value !== null
+    const hasCheckableValue = tagName === 'INPUT' &&
+      (inputType === 'checkbox' || inputType === 'radio') &&
+      typeof value === 'boolean'
 
     let delay = 0
     if (i === 0) {
@@ -599,11 +603,12 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            ...(isContentEditable && { isContentEditable: true }),
             recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
           })
-        } else if (value) {
+        } else if (value || hasContentEditableValue || hasCheckableValue) {
           steps.push({
             type: 'change',
             target: 'main',
@@ -612,6 +617,7 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            ...(isContentEditable && { isContentEditable: true }),
             recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
@@ -621,7 +627,7 @@ function generateUserFlow(events, options) {
       case 'keydown':
         if (isSpecialKey(key)) {
           steps.push({ type: 'keyDown', target: 'main', key })
-        } else if (keyCode === 9 && value) {
+        } else if (keyCode === 9 && (value || hasContentEditableValue)) {
           steps.push({
             type: 'change',
             target: 'main',
@@ -630,6 +636,7 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            ...(isContentEditable && { isContentEditable: true }),
             recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
@@ -639,7 +646,7 @@ function generateUserFlow(events, options) {
       case 'keyup':
         if (isSpecialKey(key)) {
           steps.push({ type: 'keyUp', target: 'main', key })
-        } else if (value) {
+        } else if (value || hasContentEditableValue) {
           steps.push({
             type: 'change',
             target: 'main',
@@ -648,6 +655,7 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            ...(isContentEditable && { isContentEditable: true }),
             recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
@@ -655,7 +663,7 @@ function generateUserFlow(events, options) {
         }
         break
       case 'input':
-        if ((tagName === 'INPUT' || tagName === 'TEXTAREA') && value) {
+        if (((tagName === 'INPUT' || tagName === 'TEXTAREA') && value) || hasContentEditableValue) {
           steps.push({
             type: 'change',
             target: 'main',
@@ -664,6 +672,7 @@ function generateUserFlow(events, options) {
             value,
             tagName,
             inputType,
+            ...(isContentEditable && { isContentEditable: true }),
             recordingTargetId,
             duration: delay,
             ...(event.frameIndex && { frame: event.frameIndex })
@@ -791,6 +800,7 @@ function filterSteps(steps) {
         previousChange?.target === step.target &&
         previousChange?.tagName === step.tagName &&
         previousChange?.inputType === step.inputType &&
+        previousChange?.isContentEditable === step.isContentEditable &&
         JSON.stringify(previousChange?.frameSelectors) === JSON.stringify(step.frameSelectors) &&
         previousChange?.frame === step.frame
       const sameRecordedElement = previousChange?.recordingTargetId != null &&
@@ -809,7 +819,7 @@ function filterSteps(steps) {
         sameRecordedElement &&
         isAdjacentChange &&
         hasStableSelectorAlternative
-      const isDuplicate = (sameFieldShape && sameSelector) || isTransientSelectorDuplicate
+      const isDuplicate = (sameFieldShape && sameSelector && isAdjacentChange) || isTransientSelectorDuplicate
       if (isDuplicate) {
         // Remove the previous change and any intermediate keyboard events after it
         filteredSteps.splice(lastChangeIndex)

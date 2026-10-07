@@ -9,6 +9,7 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
 import { BaseAction } from './BaseAction.js'
 import { ClickAction, preferScopedTextForFragileListClick } from './ClickAction.js'
 import { ChangeAction } from './ChangeAction.js'
+import { toJavaScriptStringLiteral } from './JavaScriptLiteral.js'
 
 export class FrameAction extends BaseAction {
   constructor(stack, context, commonCounter, data) {
@@ -25,7 +26,7 @@ export class FrameAction extends BaseAction {
       let frameLocatorString = currentPage
 
       for (const frameSelector of step.frameSelectors) {
-        frameLocatorString += `.frameLocator('${frameSelector}')`
+        frameLocatorString += `.frameLocator(${toJavaScriptStringLiteral(frameSelector)})`
       }
 
       frameActions.push(`const frame${this.frameCount} = ${frameLocatorString};`)
@@ -35,7 +36,7 @@ export class FrameAction extends BaseAction {
         const clickSelector = replayStep.selectors?.find(selector => selector?.[0])?.[0]
         if (clickSelector) {
           const timeout = step?.timeout
-          frameActions.push(`const frameAction${this.frameAction} = frame${this.frameCount}.locator('${clickSelector}');`)
+          frameActions.push(`const frameAction${this.frameAction} = frame${this.frameCount}.locator(${toJavaScriptStringLiteral(clickSelector)});`)
           if (timeout) {
             frameActions.push(`await frameAction${this.frameAction}.click({timeout: ${timeout}})`)
           } else {
@@ -49,10 +50,16 @@ export class FrameAction extends BaseAction {
       }
 
       if (step.type === 'change') {
-        const changeSelector = step.selectors?.find(selector => selector[0])
+        const changeSelector = step.selectors?.find(selector => selector?.[0])?.[0]
         if (changeSelector) {
-          frameActions.push(`const frameAction${this.frameAction} = frame${this.frameCount}.locator('${changeSelector}');`)
-          frameActions.push(`await frameAction${this.frameAction}.fill('${changeSelector}', '${step.value}');`)
+          frameActions.push(`const frameAction${this.frameAction} = frame${this.frameCount}.locator(${toJavaScriptStringLiteral(changeSelector)});`)
+          if (step.inputType === 'checkbox' || step.inputType === 'radio') {
+            frameActions.push(`await frameAction${this.frameAction}.setChecked(${step.value} == true);`)
+          } else if (step.inputType === 'select-one') {
+            frameActions.push(`await frameAction${this.frameAction}.selectOption(${toJavaScriptStringLiteral(step.value)});`)
+          } else {
+            frameActions.push(`await frameAction${this.frameAction}.fill(${toJavaScriptStringLiteral(step.value)});`)
+          }
         } else {
           const changeAction = new ChangeAction(this.stack, this.context, this.commonCounter)
           const changeActionResults = changeAction.handle(step)
