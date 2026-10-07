@@ -6,6 +6,8 @@ you may not use this file except in compliance with the License.
 For full license text, see LICENSE.txt file in the repo root or http://www.apache.org/licenses/LICENSE-2.0
 */
 
+import { toJavaScriptStringLiteral } from './JavaScriptLiteral.js'
+
 export class BaseAction {
   constructor(stack, context, commonCounter, data) {
     this.stack = stack
@@ -32,6 +34,10 @@ export class BaseAction {
 
     if (commentParts.length > 0) {
       return `// ${commentParts.join(', ')}`
+        .replace(/\r/g, '\\r')
+        .replace(/\n/g, '\\n')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029')
     }
 
     return ''
@@ -40,23 +46,24 @@ export class BaseAction {
   _buildActionString(step, action, selector, value, options = {}) {
     const awaitStr = options.await ? 'await ' : ''
     const ending = options.ending ?? ''
+    const selectorLiteral = toJavaScriptStringLiteral(selector)
 
     if (step.type === 'click' || step.type === 'doubleClick') {
       const timeout = step?.timeout
       if (timeout) {
-        return `${awaitStr}${this.context.page}.${action}('${selector}', {timeout: ${timeout}})${ending}`
+        return `${awaitStr}${this.context.page}.${action}(${selectorLiteral}, {timeout: ${timeout}})${ending}`
       }
-      return `${awaitStr}${this.context.page}.${action}('${selector}')${ending}`
+      return `${awaitStr}${this.context.page}.${action}(${selectorLiteral})${ending}`
     } else if (step.type === 'change') {
       if (step.inputType === 'checkbox' || step.inputType === 'radio') {
-        return `${awaitStr}${this.context.page}.locator('${selector}').setChecked(${value} == true)${ending}`
+        return `${awaitStr}${this.context.page}.locator(${selectorLiteral}).setChecked(${value} == true)${ending}`
       } else if (step.inputType === 'select-one') {
-        return `${awaitStr}${this.context.page}.locator('${selector}').selectOption('${value}')${ending}`
+        return `${awaitStr}${this.context.page}.locator(${selectorLiteral}).selectOption(${toJavaScriptStringLiteral(value)})${ending}`
       }
-      return `${awaitStr}${this.context.page}.${action}('${selector}', '${value}')${ending}`
+      return `${awaitStr}${this.context.page}.${action}(${selectorLiteral}, ${toJavaScriptStringLiteral(value)})${ending}`
     }
 
-    return `${awaitStr}${this.context.page}.${action}('${selector}')${ending}`
+    return `${awaitStr}${this.context.page}.${action}(${selectorLiteral})${ending}`
   }
 
   handleNewTabOrWindow(step, action, value) {

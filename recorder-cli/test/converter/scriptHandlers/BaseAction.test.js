@@ -33,6 +33,20 @@ describe('BaseAction', () => {
         "// tagName = \"A\", alternative selectors = ['#alt']"
       )
     })
+
+    it('keeps untrusted selector text on one comment line', () => {
+      const selector = ['#chosen']
+      const step = {
+        selectors: [selector, ['text/Safe label\nawait injected(); //'], ['text/Other\u2028line']]
+      }
+
+      const comment = action._buildCommentString(step, [], selector)
+
+      expect(comment).toBe(
+        "// alternative selectors = ['text/Safe label\\nawait injected(); //', 'text/Other\\u2028line']"
+      )
+      expect(comment.split(/\r\n|\r|\n|\u2028|\u2029/)).toHaveLength(1)
+    })
   })
 
   describe('_buildActionString', () => {
@@ -80,6 +94,20 @@ describe('BaseAction', () => {
     it('builds a plain text change as fill', () => {
       expect(action._buildActionString({ type: 'change', inputType: 'text' }, 'fill', 'sel', 'val', {})).toBe(
         "page.fill('sel', 'val')"
+      )
+    })
+
+    it('escapes rich-text values as a valid single-quoted JavaScript string', () => {
+      expect(
+        action._buildActionString(
+          { type: 'change', isContentEditable: true },
+          'fill',
+          '#editor[data-label="Owner\'s"]',
+          "Bob's\nsecond\\line\tend\u2028tail\u2029done",
+          { await: true, ending: ';' }
+        )
+      ).toBe(
+        "await page.fill('#editor[data-label=\"Owner\\'s\"]', 'Bob\\'s\\nsecond\\\\line\\tend\\u2028tail\\u2029done');"
       )
     })
 

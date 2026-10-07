@@ -16,7 +16,8 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
  * shadow hosts.
  *
  * Runs in a CDP ISOLATED world — same behavior as Chrome extension content
- * scripts. DOM APIs are unpatched, event.target is the real deep target.
+ * scripts. DOM APIs are unpatched, but composed events can still retarget
+ * event.target to a shadow host; callers must resolve the composed path.
  */
 import { dataAttributes, otherAttributes } from './selector.js'
 import { OVERLAY_ID } from './constants.js'

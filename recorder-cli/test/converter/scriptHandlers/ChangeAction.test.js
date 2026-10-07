@@ -88,6 +88,22 @@ describe('ChangeAction', () => {
     ])
   })
 
+  it('escapes the selector while keeping a parameter value as a runtime expression', () => {
+    const step = {
+      type: 'change',
+      value: 'recorded fallback',
+      inputType: 'text',
+      selectors: [['input[data-label="Owner\'s"]']],
+      params: { parameterise: true, paramName: 'description' }
+    }
+
+    const result = buildAction().handle(step)
+
+    expect(result[result.length - 1]).toBe(
+      "await page.fill('input[data-label=\"Owner\\'s\"]', description);"
+    )
+  })
+
   it('parameterises a checkbox field using setChecked', () => {
     const step = {
       type: 'change',

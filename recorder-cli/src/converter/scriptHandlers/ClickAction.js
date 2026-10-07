@@ -7,6 +7,39 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
 */
 
 import { BaseAction } from './BaseAction.js'
+import { toJavaScriptStringLiteral } from './JavaScriptLiteral.js'
+
+export function preferScopedTextForFragileListClick(step) {
+  if (step.type !== 'click' || step.params?.parameterise || step.componentType !== 'list') {
+    return step
+  }
+
+  const primarySelector = step.selectors?.find(selector => selector?.[0])?.[0]
+  if (!primarySelector?.includes(':nth-child(')) return step
+
+  const textSelector = step.selectors
+    ?.find(selector => selector?.[0]?.startsWith('text/'))?.[0]
+  const text = textSelector?.slice('text/'.length)
+  if (!text || /[\u0000-\u001F\u007F\u2028\u2029]/u.test(text)) return step
+
+  const parentSelector = step.parentSelectors
+    ?.find(selector => isCssSelector(selector?.[0]))?.[0]
+  if (!parentSelector) return step
+
+  // Recorder text selectors use the Puppeteer `text/` dialect, which
+  // Playwright cannot execute directly. Scope Playwright's text engine to
+  // the recorded list so the option remains stable when its row moves.
+  const scopedTextSelector = `${parentSelector} >> :text(${JSON.stringify(text)})`
+
+  return {
+    ...step,
+    selectors: [[scopedTextSelector], ...step.selectors]
+  }
+}
+
+function isCssSelector(selector) {
+  return Boolean(selector) && !/^(aria|css|pierce|text|xpath)\//.test(selector)
+}
 
 export class ClickAction extends BaseAction {
   static nthSelectorCounters = {
@@ -15,7 +48,8 @@ export class ClickAction extends BaseAction {
   }
 
   handle(step) {
-    const actions = this.handleNewTabOrWindow(step, 'click')
+    const replayStep = preferScopedTextForFragileListClick(step)
+    const actions = this.handleNewTabOrWindow(replayStep, 'click')
 
     if (step.params?.parameterise) {
       const childIndex = typeof step.params.childIndex === 'number' && !isNaN(step.params.childIndex) ? step.params.childIndex : null
@@ -48,7 +82,7 @@ export class ClickAction extends BaseAction {
     const varName = counterKey.replace('Counter', 'Selector')
 
     const selector = `
-const ${varName}${counter} = await ${this.context.page}.locator('${childSelector}').nth(${childIndex ?? 0})
+const ${varName}${counter} = await ${this.context.page}.locator(${toJavaScriptStringLiteral(childSelector)}).nth(${childIndex ?? 0})
 await ${varName}${counter}.click()
 `
     ClickAction.nthSelectorCounters[counterKey] += 1

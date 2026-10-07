@@ -33,15 +33,123 @@ const recordingControls = {
   GET_SCREENSHOT: 'GET_SCREENSHOT',
 }
 
+const POINTER_SNAPSHOT_MAX_AGE_MS = 2000
+
+const EDITABLE_BLOCK_TAGS = new Set([
+  'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DD', 'DETAILS', 'DIV', 'DL',
+  'DT', 'FIELDSET', 'FIGCAPTION', 'FIGURE', 'FOOTER', 'FORM', 'H1', 'H2',
+  'H3', 'H4', 'H5', 'H6', 'HEADER', 'HGROUP', 'LI', 'MAIN', 'NAV', 'OL',
+  'P', 'PRE', 'SEARCH', 'SECTION', 'SUMMARY', 'UL'
+])
+const NON_RENDERED_EDITABLE_TAGS = new Set(['NOSCRIPT', 'SCRIPT', 'STYLE', 'TEMPLATE'])
+
+function isHiddenEditableElement(element) {
+  if (element.hidden || NON_RENDERED_EDITABLE_TAGS.has(element.tagName)) return true
+
+  const view = element.ownerDocument?.defaultView
+  if (!view?.getComputedStyle) return false
+
+  const style = view.getComputedStyle(element)
+  return style.display === 'none' ||
+    style.visibility === 'hidden' ||
+    style.visibility === 'collapse' ||
+    style.contentVisibility === 'hidden'
+}
+
+/**
+ * Convert editable DOM into the text accepted by Playwright's Locator.fill().
+ * Browser innerText inserts different numbers of newlines for P, DIV and blank
+ * blocks, so feeding it back to fill is not idempotent. This serializer models
+ * block children as logical lines and treats one trailing BR as the browser's
+ * caret placeholder.
+ */
+function getContentEditableFillText(root) {
+  function serializeContainer(container) {
+    const parts = []
+    let inlineTokens = []
+
+    const flushInline = () => {
+      if (!inlineTokens.length) return
+
+      if (inlineTokens[inlineTokens.length - 1].kind === 'br') inlineTokens.pop()
+      parts.push({
+        kind: 'inline',
+        text: inlineTokens
+          .map(token => token.kind === 'br' ? '\n' : token.text)
+          .join('')
+      })
+      inlineTokens = []
+    }
+
+    const visit = node => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (node.data) {
+          inlineTokens.push({ kind: 'text', text: node.data.replace(/\r\n?/g, '\n') })
+        }
+        return
+      }
+      if (!(node instanceof Element) || isHiddenEditableElement(node)) return
+      if (node.tagName === 'BR') {
+        inlineTokens.push({ kind: 'br' })
+        return
+      }
+      if (EDITABLE_BLOCK_TAGS.has(node.tagName)) {
+        flushInline()
+        parts.push({ kind: 'block', text: serializeContainer(node) })
+        return
+      }
+
+      for (const child of node.childNodes) visit(child)
+    }
+
+    for (const child of container.childNodes) visit(child)
+    flushInline()
+
+    return parts
+      .filter((part, index) => {
+        if (part.kind !== 'inline' || !/^[ \t\r\n]*$/.test(part.text)) return true
+        return parts[index - 1]?.kind !== 'block' && parts[index + 1]?.kind !== 'block'
+      })
+      .map(part => part.text)
+      .join('\n')
+  }
+
+  return serializeContainer(root)
+}
+
+function getExplicitContentEditableState(element) {
+  const reflectedState = element.contentEditable
+  if (reflectedState === 'true' || reflectedState === 'plaintext-only') return true
+  if (reflectedState === 'false') return false
+  if (reflectedState === 'inherit') return null
+
+  // JSDOM and older engines may not expose the reflected property. Mirror the
+  // enumerated-attribute keywords without trimming: whitespace makes a keyword
+  // invalid and therefore inherited in browsers.
+  const attribute = element.getAttribute('contenteditable')
+  if (attribute === null) return null
+  if (attribute === '') return true
+  const normalized = attribute.toLowerCase()
+  if (normalized === 'true' || normalized === 'plaintext-only') return true
+  if (normalized === 'false') return false
+  return null
+}
+
 export class Recorder {
   constructor({ state, sendMessage }) {
     this._eventLog = []
     this._previousEvent = null
+    this._lastRecordedEvent = null
     this._isTopFrame = (window.location === window.parent.location)
     this._isRecordingClicks = true
     this._state = state
     this._sendMessageFn = sendMessage
     this._debounceTimer = null
+    this._hasPendingContentEditableInput = false
+    this._pointerDownSnapshot = null
+    this._recordingTargetIds = new WeakMap()
+    this._recordingTargetIdPrefix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    this._nextRecordingTargetId = 1
   }
 
   init() {
@@ -62,6 +170,12 @@ export class Recorder {
   _addAllListeners(events) {
     const boundedRecordEvent = this._recordEvent.bind(this)
     const debouncedRecordEvent = this._debounceRecordEvent.bind(this)
+    const capturePointerDown = this._capturePointerDown.bind(this)
+
+    // A component can replace the pressed option before the browser dispatches
+    // click, causing click.target to become a shared ancestor. Capture the
+    // selector while the original pointer target is still in the DOM.
+    window.addEventListener('pointerdown', capturePointerDown, true)
 
     events.forEach(type => {
       if (type === eventsToRecord.INPUT || type === eventsToRecord.KEYUP || type === eventsToRecord.KEYDOWN) {
@@ -72,9 +186,103 @@ export class Recorder {
     })
   }
 
+  _capturePointerDown(e) {
+    if (!e?.isTrusted || e.isPrimary === false || e.button !== 0) return
+
+    this._pointerDownSnapshot = null
+
+    try {
+      const target = getClickableTargetFromEvent(e)
+      if (!target || !(target instanceof Element)) return
+
+      const selectors = getSelector(e, { dataAttribute: this._state.dataAttribute }, target)
+      if (!selectors) return
+
+      let frameSelectors
+      if (window.self !== window.top) {
+        frameSelectors = this._getIframeSelectors(e, target)
+      }
+
+      const { parentSelectors, componentType } = this._getParentSelectors(e, target)
+      const rect = target.getBoundingClientRect()
+      const pointerPath = typeof e.composedPath === 'function'
+        ? e.composedPath().filter(element => element instanceof Element)
+        : [target]
+      if (!pointerPath.includes(target)) pointerPath.unshift(target)
+
+      this._pointerDownSnapshot = {
+        capturedAt: Date.now(),
+        pointerId: Number.isFinite(e.pointerId) ? e.pointerId : null,
+        button: e.button,
+        target,
+        pointerPath,
+        targetBounds: {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom
+        },
+        selectors,
+        frameSelectors,
+        parentSelectors,
+        componentType,
+        tagName: target.tagName,
+        inputType: target.type,
+        href: target.href || null
+      }
+    } catch (err) {
+      this._pointerDownSnapshot = null
+    }
+  }
+
+  _consumePointerDownSnapshot(e, currentTarget) {
+    const snapshot = this._pointerDownSnapshot
+    this._pointerDownSnapshot = null
+
+    if (!snapshot || e.type !== eventsToRecord.CLICK || e.detail === 0) return null
+
+    const age = Date.now() - snapshot.capturedAt
+    if (age < 0 || age > POINTER_SNAPSHOT_MAX_AGE_MS) return null
+    if (Number.isFinite(e.button) && e.button !== snapshot.button) return null
+    if (Number.isFinite(e.pointerId) && e.pointerId > 0 &&
+      snapshot.pointerId > 0 && e.pointerId !== snapshot.pointerId) return null
+
+    if (currentTarget !== snapshot.target) {
+      if (!snapshot.pointerPath.includes(currentTarget)) return null
+
+      const { left, top, right, bottom } = snapshot.targetBounds
+      if (![e.clientX, e.clientY, left, top, right, bottom].every(Number.isFinite)) return null
+      if (e.clientX < left || e.clientX >= right || e.clientY < top || e.clientY >= bottom) return null
+    }
+
+    return snapshot
+  }
+
   _debounceRecordEvent(e) {
+    // Native composedPath() is cleared after dispatch. Resolve the deep target
+    // now so deferred input/key events do not collapse to a shadow host.
+    const target = getClickableTargetFromEvent(e) || e.target
+    const contentEditableHost = this._getContentEditableHost(target)
+
+    if (e.type === eventsToRecord.KEYDOWN) {
+      this._hasPendingContentEditableInput = false
+    } else if (contentEditableHost && e.type === eventsToRecord.INPUT) {
+      // Contenteditable mutations are represented by the input event. Keep it
+      // authoritative by suppressing the same gesture's trailing keyup
+      // (notably Enter or Backspace).
+      clearTimeout(this._debounceTimer)
+      this._hasPendingContentEditableInput = true
+      this._recordEvent(e, contentEditableHost)
+      return
+    } else if (e.type === eventsToRecord.KEYUP && this._hasPendingContentEditableInput) {
+      // A reactive component may replace the editing host between input and
+      // keyup. The input snapshot is still authoritative for that gesture.
+      this._hasPendingContentEditableInput = false
+      return
+    }
+
     clearTimeout(this._debounceTimer)
-    this._debounceTimer = setTimeout(() => this._recordEvent(e), 0)
+    this._debounceTimer = setTimeout(() => this._recordEvent(e, target), 0)
   }
 
   _sendMessage(msg) {
@@ -89,21 +297,42 @@ export class Recorder {
     }
   }
 
-  _recordEvent(e) {
+  _recordEvent(e, capturedTarget) {
     // Only record user-initiated actions
     if (!e.isTrusted) return
+
+    const currentTarget = capturedTarget || getClickableTargetFromEvent(e) || e.target
+    const pointerSnapshot = e.type === eventsToRecord.CLICK
+      ? this._consumePointerDownSnapshot(e, currentTarget)
+      : null
+    const contentEditableHost = this._getContentEditableHost(currentTarget)
+    const shouldUseContentEditableHost = contentEditableHost &&
+      (e.type === eventsToRecord.INPUT ||
+       e.type === eventsToRecord.CHANGE ||
+       e.type === eventsToRecord.KEYDOWN ||
+       e.type === eventsToRecord.KEYUP)
+    const target = pointerSnapshot?.target ||
+      (shouldUseContentEditableHost ? contentEditableHost : currentTarget)
+
+    // Activating a label dispatches the user's click on the visible label
+    // content, then Chromium forwards a second detail-zero click to the
+    // associated checkbox/radio. Replaying both clicks targets a commonly
+    // covered native input and can also toggle a control twice. Suppress only
+    // that exact forwarding sequence; direct pointer and keyboard activations
+    // remain recordable.
+    if (this._isForwardedCheckableLabelClick(e, target)) return
 
     // Assert mode: next click captures an assertion, then resets
     if ((e.type === 'click' || e.type === 'dblclick') && this._state.assertNextClick) {
       e.preventDefault()
       e.stopPropagation()
 
-      const selectors = getSelector(e, { dataAttribute: this._state.dataAttribute })
+      const selectors = pointerSnapshot?.selectors ||
+        getSelector(e, { dataAttribute: this._state.dataAttribute }, target)
       if (!selectors) return // stay armed — element wasn't selectable
 
       this._state.assertNextClick = false
 
-      const target = e.target
       const directText = Array.from(target.childNodes)
         .filter(n => n.nodeType === 3)
         .map(n => n.textContent.trim())
@@ -120,17 +349,16 @@ export class Recorder {
         tagName: target.tagName,
         eventTime: Date.now()
       })
+      this._lastRecordedEvent = this._snapshotRecordedEvent(e, target)
 
       this._state.hasAsserted = true
       setTimeout(() => { this._state.hasAsserted = false }, 400)
       return
     }
 
-    // Deduplicate by timestamp
-    if (this._previousEvent && this._previousEvent.timeStamp === e.timeStamp) return
-
-    // In the ISOLATED world, event.target IS the deep target — no retargeting
-    const target = e.target
+    // The same Event object can occasionally be delivered twice. Distinct
+    // events may legitimately share a timestamp when timer precision is low.
+    if (this._previousEvent === e) return
 
     // Skip certain input events that are handled by change
     if (target.tagName === 'INPUT' &&
@@ -142,15 +370,16 @@ export class Recorder {
     this._previousEvent = e
 
     try {
-      let iframeSelectors
-      if (window.self !== window.top) {
-        iframeSelectors = this._getIframeSelectors(e)
+      let iframeSelectors = pointerSnapshot?.frameSelectors
+      if (!pointerSnapshot && window.self !== window.top) {
+        iframeSelectors = this._getIframeSelectors(e, target)
       }
 
-      const selectors = getSelector(e, { dataAttribute: this._state.dataAttribute })
+      const selectors = pointerSnapshot?.selectors ||
+        getSelector(e, { dataAttribute: this._state.dataAttribute }, target)
       if (!selectors) return
 
-      const { parentSelectors, componentType } = this._getParentSelectors(e)
+      const { parentSelectors, componentType } = pointerSnapshot || this._getParentSelectors(e, target)
 
       // Flash the overlay to indicate a recorded event
       this._state.hasRecorded = true
@@ -161,34 +390,75 @@ export class Recorder {
         frameSelectors: iframeSelectors,
         parentSelectors,
         componentType,
-        value: this._getValue(e),
-        tagName: target.tagName,
-        inputType: target.type,
+        value: this._getValue(e, target),
+        isContentEditable: Boolean(this._getContentEditableHost(target)),
+        tagName: pointerSnapshot ? pointerSnapshot.tagName : target.tagName,
+        inputType: pointerSnapshot ? pointerSnapshot.inputType : target.type,
         action: e.type,
         keyCode: e.keyCode || null,
-        href: target.href || null,
-        coordinates: this._getCoordinates(e),
+        href: pointerSnapshot ? pointerSnapshot.href : (target.href || null),
+        coordinates: pointerSnapshot
+          ? this._getPointerSnapshotCoordinates(e, pointerSnapshot, currentTarget)
+          : this._getCoordinates(e, target),
         eventTime: Date.now(),
         type: e.type,
-        key: e.key
+        key: e.key,
+        recordingTargetId: this._getRecordingTargetId(target)
       })
+      this._lastRecordedEvent = this._snapshotRecordedEvent(e, target)
     } catch (err) {
       // Swallow errors from non-element events
     }
   }
 
-  _getParentSelectors(e) {
-    const element = e.target
+  _isForwardedCheckableLabelClick(e, target) {
+    const previous = this._lastRecordedEvent
+    const previousTimeStamp = previous?.event?.timeStamp
+    if (e.type !== eventsToRecord.CLICK ||
+      e.detail !== 0 ||
+      target?.tagName !== 'INPUT' ||
+      (target.type !== 'checkbox' && target.type !== 'radio') ||
+      previous?.event?.type !== eventsToRecord.CLICK ||
+      !Number.isFinite(e.timeStamp) ||
+      !Number.isFinite(previousTimeStamp) ||
+      previousTimeStamp !== e.timeStamp ||
+      !(previous.target instanceof Element)) {
+      return false
+    }
+
+    const previousPath = previous.path?.length ? previous.path : [previous.target]
+    return Array.from(target.labels || []).some(label =>
+      previousPath.some(element => label === element || label.contains(element))
+    )
+  }
+
+  _snapshotRecordedEvent(e, target) {
+    let path = []
+    try {
+      // The browser clears composedPath() after dispatch, before a label's
+      // default action emits the forwarded input click.
+      if (typeof e.composedPath === 'function') {
+        path = e.composedPath().filter(element => element instanceof Element)
+      }
+    } catch (err) {
+      // Some event shims expose composedPath but cannot be read after dispatch.
+    }
+
+    if (target instanceof Element && !path.includes(target)) path.unshift(target)
+    return { event: e, target, path }
+  }
+
+  _getParentSelectors(e, targetElement) {
+    const element = targetElement || e.target
     let parentSelectors = null
     let componentType = null
 
-    // In ISOLATED world, closest() works across open shadow DOM boundaries
-    const tableBody = element.closest('tbody')
+    const tableBody = this._closestAcrossShadowRoots(element, 'tbody')
     if (tableBody) {
       parentSelectors = getSelector(null, { dataAttribute: this._state.dataAttribute }, tableBody)
       componentType = 'table'
     } else {
-      const unorderedList = element.closest('ul')
+      const unorderedList = this._closestAcrossShadowRoots(element, 'ul')
       if (unorderedList) {
         parentSelectors = getSelector(null, { dataAttribute: this._state.dataAttribute }, unorderedList)
         componentType = 'list'
@@ -198,17 +468,81 @@ export class Recorder {
     return { parentSelectors, componentType }
   }
 
-  _getValue(e) {
-    const target = e.target
-    if (target.type !== 'password') {
-      return target.type === 'checkbox' || target.type === 'radio'
-        ? target.checked
-        : (target.value || e?.detail?.value)
+  _closestAcrossShadowRoots(element, selector) {
+    let current = element
+
+    while (current instanceof Element) {
+      const match = current.closest(selector)
+      if (match) return match
+
+      const root = current.getRootNode()
+      current = root?.host instanceof Element ? root.host : null
     }
-    return '******'
+
+    return null
   }
 
-  _getCoordinates(evt) {
+  _getValue(e, targetElement) {
+    const target = targetElement || e.target
+    if (target.type === 'password') return '******'
+    if (target.type === 'checkbox' || target.type === 'radio') return target.checked
+
+    const contentEditableHost = this._getContentEditableHost(target)
+    if (contentEditableHost) {
+      return getContentEditableFillText(contentEditableHost)
+    }
+
+    return target.value || e?.detail?.value
+  }
+
+  _getContentEditableHost(element) {
+    if (!(element instanceof Element)) return null
+    if (element.matches('input, textarea, select')) return null
+
+    if (typeof element.isContentEditable === 'boolean') {
+      if (!element.isContentEditable) return null
+
+      let current = element
+      while (current.parentElement?.isContentEditable) current = current.parentElement
+      return current
+    }
+
+    let current = element
+    let editingHost = null
+    while (current instanceof Element) {
+      const state = getExplicitContentEditableState(current)
+      if (state === false) {
+        if (!editingHost) return null
+        break
+      }
+      if (state === true) editingHost = current
+
+      if (current.parentElement) {
+        current = current.parentElement
+      } else {
+        // The contenteditable state does not inherit from a shadow host into
+        // its shadow tree. Stop here rather than treating unrelated shadow
+        // controls as part of an editor on the host.
+        current = null
+      }
+    }
+
+    return editingHost
+  }
+
+  _getRecordingTargetId(target) {
+    if (!(target instanceof Element)) return null
+
+    let id = this._recordingTargetIds.get(target)
+    if (!id) {
+      id = `${this._recordingTargetIdPrefix}:${this._nextRecordingTargetId++}`
+      this._recordingTargetIds.set(target, id)
+    }
+
+    return id
+  }
+
+  _getCoordinates(evt, targetElement) {
     const eventsWithCoordinates = {
       mouseup: true,
       mousedown: true,
@@ -217,14 +551,25 @@ export class Recorder {
       click: true,
     }
 
-    const element = getClickableTargetFromEvent(evt)
+    const element = targetElement || getClickableTargetFromEvent(evt)
     const { offsetX, offsetY } = getMouseEventOffsets(evt, element)
 
     return eventsWithCoordinates[evt.type] ? { x: offsetX, y: offsetY } : null
   }
 
-  _getIframeSelectors(event) {
-    let ownerDocument = event.target.ownerDocument
+  _getPointerSnapshotCoordinates(evt, snapshot, currentTarget) {
+    if (currentTarget === snapshot.target) {
+      return this._getCoordinates(evt, snapshot.target)
+    }
+
+    return {
+      x: evt.clientX - snapshot.targetBounds.left,
+      y: evt.clientY - snapshot.targetBounds.top
+    }
+  }
+
+  _getIframeSelectors(event, targetElement) {
+    let ownerDocument = (targetElement || event.target).ownerDocument
     let frameSelectors = []
     let currentWindow = window
 

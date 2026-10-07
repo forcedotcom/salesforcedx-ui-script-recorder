@@ -44,4 +44,66 @@ describe('convertToPlaywright', () => {
     expect(output).toContain("await page.waitForLoadState('domcontentloaded')")
     expect(output).not.toContain('identity/verification')
   })
+
+  it('emits parseable replay code for multiline rich-text values', async () => {
+    const data = {
+      title: 'Rich text',
+      steps: [{
+        type: 'change',
+        selectors: [['#editor']],
+        tagName: 'DIV',
+        isContentEditable: true,
+        value: "Bob's description\nsecond line"
+      }]
+    }
+
+    const output = await convertToPlaywright(data)
+    const scriptWithoutStaticImports = output.replace(/^\s*import\s.+;$/gm, '')
+
+    expect(output).toContain("await page.fill('#editor'")
+    expect(() => new Function(scriptWithoutStaticImports)).not.toThrow()
+  })
+
+  it('replays a styled radio through its visible control and deterministic state change', async () => {
+    const data = {
+      title: 'Styled radio',
+      steps: [
+        {
+          type: 'click',
+          selectors: [['#radio-faux']],
+          tagName: 'SPAN'
+        },
+        {
+          type: 'change',
+          selectors: [['#radio-input']],
+          tagName: 'INPUT',
+          inputType: 'radio',
+          value: true
+        }
+      ]
+    }
+
+    const output = await convertToPlaywright(data)
+
+    expect(output).toContain("await page.click('#radio-faux')")
+    expect(output).toContain("page.locator('#radio-input').setChecked(true == true)")
+    expect(output).not.toContain("page.click('#radio-input')")
+  })
+
+  it('replays an unchecked checkbox state', async () => {
+    const data = {
+      title: 'Unchecked checkbox',
+      steps: [{
+        type: 'change',
+        selectors: [['#notifications']],
+        tagName: 'INPUT',
+        inputType: 'checkbox',
+        value: false
+      }]
+    }
+
+    const output = await convertToPlaywright(data)
+
+    expect(output).toContain("page.locator('#notifications').setChecked(false == true)")
+  })
 })

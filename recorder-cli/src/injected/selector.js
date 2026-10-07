@@ -32,9 +32,33 @@ const selectorTypesToRecord = [
 
 const stringOnlyRegex = /^[A-Za-z ()\-_[\]]+$/
 const nonNumberOnlyRegex = /.*[^\d].*/
+const interactiveSelector =
+  'a, area[href], audio[controls], button, details, embed, iframe, input, label, object, ' +
+  'select, summary, textarea, video[controls], [contenteditable=""], [contenteditable="true" i], ' +
+  '[contenteditable="plaintext-only" i], ' +
+  '[draggable="true"], [onclick], [tabindex], ' +
+  '[role~="button"], [role~="checkbox"], [role~="combobox"], [role~="gridcell"], ' +
+  '[role~="link"], [role~="listbox"], [role~="menuitem"], [role~="menuitemcheckbox"], ' +
+  '[role~="menuitemradio"], [role~="option"], [role~="radio"], [role~="scrollbar"], ' +
+  '[role~="searchbox"], [role~="slider"], [role~="spinbutton"], [role~="switch"], ' +
+  '[role~="tab"], [role~="textbox"], [role~="treeitem"]'
 
 function hasUnwantedChars(text) {
   return text.includes(':') || text.includes(';')
+}
+
+function isContentEditableTarget(element) {
+  if (element?.isContentEditable === true) return true
+
+  const reflectedState = element?.contentEditable
+  if (reflectedState === 'true' || reflectedState === 'plaintext-only') return true
+  if (typeof reflectedState === 'string') return false
+
+  const attribute = element?.getAttribute?.('contenteditable')
+  if (attribute === '') return true
+  if (attribute === null || attribute === undefined) return false
+  const normalized = attribute.toLowerCase()
+  return normalized === 'true' || normalized === 'plaintext-only'
 }
 
 function checkForStringAndSpace(text) {
@@ -137,9 +161,10 @@ function getInputRole(element) {
 export function getSelector(e, { dataAttribute } = {}, targetElement) {
   let cssSelector, ariaSelector, textSelector = ''
 
-  // In the ISOLATED world, event.target is already the deep target element
-  // (no retargeting across open shadow DOM boundaries).
-  let element = targetElement || e?.target
+  // Component events may be retargeted to a shadow host or framework wrapper.
+  // Resolve the first visible element from the event path so recording uses
+  // the same concrete element that was under the pointer.
+  let element = targetElement || getClickableTargetFromEvent(e)
 
   if (!element || !(element instanceof Element)) return null
 
@@ -148,10 +173,11 @@ export function getSelector(e, { dataAttribute } = {}, targetElement) {
     cssSelector = `[${dataAttribute}="${element.getAttribute(dataAttribute)}"]`
   } else {
     try {
-      cssSelector = finder(element, finderOptions)
+      const baseFinderOptions = getFinderOptions(dataAttribute)
+      cssSelector = finder(element, baseFinderOptions)
       if (element && (!cssSelector || cssSelector?.includes('slot'))) {
         element = getClickableTargetFromEvent(e)
-        const opts = { ...finderOptions, slotCheck: true }
+        const opts = { ...baseFinderOptions, slotCheck: true }
         cssSelector = finder(element, opts)
       }
     } catch (err) {
@@ -171,11 +197,100 @@ export function getSelector(e, { dataAttribute } = {}, targetElement) {
   if (element?.type !== 'password' &&
       element?.tagName !== 'INPUT' &&
       element?.tagName !== 'TEXTAREA' &&
-      element?.tagName !== 'SELECT') {
+      element?.tagName !== 'SELECT' &&
+      !isContentEditableTarget(element)) {
     textSelector = getTextSelector(element)
+    if (!textSelector) {
+      textSelector = getTextSelectorFromOptionAncestor(element)
+    }
   }
 
   return finaliseSelectors(cssSelector, ariaSelector, textSelector)
+}
+
+function getFinderOptions(dataAttribute) {
+  if (!dataAttribute) return finderOptions
+
+  const defaultAttributeFilter = finderOptions.attr
+  return {
+    ...finderOptions,
+    attr: (name, value) =>
+      (name === dataAttribute && Boolean(value)) ||
+      (typeof defaultAttributeFilter === 'function' && defaultAttributeFilter(name, value))
+  }
+}
+
+function getTextSelectorFromOptionAncestor(element) {
+  const option = closestAcrossShadowRoots(element, '[role~="option"]')
+  if (!option) return ''
+
+  const interactive = closestAcrossShadowRoots(element, interactiveSelector)
+  if (interactive && interactive !== option) return ''
+
+  if (element !== option) {
+    let candidate = parentElementAcrossShadowRoots(element)
+    while (candidate) {
+      const selector = getTextSelector(candidate)
+      if (selector) return selector
+      if (candidate === option) break
+      candidate = parentElementAcrossShadowRoots(candidate)
+    }
+  }
+
+  const candidates = []
+  let inspected = 0
+  for (const candidate of option.querySelectorAll('*')) {
+    if (++inspected > 100) break
+    if (closestAcrossShadowRoots(candidate, interactiveSelector) !== option) continue
+    const text = candidate.textContent?.trim()
+    if (!text) continue
+
+    candidates.push({
+      element: candidate,
+      textLength: text.length,
+      depth: getElementDepth(candidate, option)
+    })
+  }
+
+  candidates.sort((a, b) => b.textLength - a.textLength || b.depth - a.depth)
+  for (const { element: candidate } of candidates.slice(0, 1)) {
+    const selector = getTextSelector(candidate)
+    if (selector) return selector
+  }
+
+  return ''
+}
+
+function getElementDepth(element, ancestor) {
+  let depth = 0
+  let current = element
+
+  while (current && current !== ancestor) {
+    depth++
+    current = current.parentElement
+  }
+
+  return depth
+}
+
+function closestAcrossShadowRoots(element, selector) {
+  let current = element
+
+  while (current instanceof Element) {
+    const match = current.closest(selector)
+    if (match) return match
+
+    const root = current.getRootNode()
+    current = root?.host instanceof Element ? root.host : null
+  }
+
+  return null
+}
+
+function parentElementAcrossShadowRoots(element) {
+  if (element.parentElement) return element.parentElement
+  const root = element.getRootNode()
+  return root?.host instanceof Element ? root.host : null
 }
 
 function finaliseSelectors(cssSelector, ariaSelector, textSelector) {
@@ -252,12 +367,22 @@ function buildFallbackSelector(element) {
 }
 
 /**
- * Returns the element that emitted the event (first element with dimensions).
- * In the ISOLATED world, event.target is already the leaf element, so this
- * just walks up from target to find the first ancestor with visible dimensions.
+ * Returns the first visible element in the event's composed path. Events that
+ * cross a component boundary can expose a retargeted host through event.target,
+ * while composedPath() still identifies the concrete element under the pointer.
+ * Falls back to the target/ancestor walk for events without an available path.
  */
 export function getClickableTargetFromEvent(event) {
   if (!event) return event?.target
+
+  if (typeof event.composedPath === 'function') {
+    const path = event.composedPath()
+    for (const element of path) {
+      if (!(element instanceof Element)) continue
+      const rect = element.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) return element
+    }
+  }
 
   let element = event.target
   while (element && element instanceof Element) {

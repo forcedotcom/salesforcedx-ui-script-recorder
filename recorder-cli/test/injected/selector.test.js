@@ -68,6 +68,164 @@ describe('getSelector', () => {
     expect(selectors[0]).toEqual(['#from-target'])
   })
 
+  it('resolves a retargeted component event from its first visible composed-path element', () => {
+    const wrapper = el('x-product-tag', { id: 'retargeted-wrapper' })
+    const shadow = wrapper.attachShadow({ mode: 'open' })
+    const option = el('div', { role: 'option', 'data-testid': 'product-tag-option' })
+    shadow.appendChild(option)
+    wrapper.getBoundingClientRect = () => ({ width: 100, height: 40 })
+    option.getBoundingClientRect = () => ({ width: 80, height: 20 })
+    append(wrapper)
+    finder.mockImplementation((element) => element === option ? '[data-testid="product-tag-option"]' : '#retargeted-wrapper')
+
+    let selectors
+    document.addEventListener('click', (event) => {
+      expect(event.target).toBe(wrapper)
+      expect(event.composedPath()[0]).toBe(option)
+      selectors = getSelector(event, {})
+    }, { capture: true, once: true })
+
+    option.dispatchEvent(new window.MouseEvent('click', { bubbles: true, composed: true }))
+
+    expect(finder).toHaveBeenCalledWith(option, expect.anything())
+    expect(selectors[0]).toEqual(['[data-testid="product-tag-option"]'])
+  })
+
+  it('keeps a configured host data attribute in shadow finder options and its slot retry', () => {
+    const host = el('x-product-tag', { 'data-qa': 'product-tag' })
+    const shadow = host.attachShadow({ mode: 'open' })
+    const option = el('span')
+    option.getBoundingClientRect = () => ({ width: 80, height: 20 })
+    shadow.appendChild(option)
+    append(host)
+    finder
+      .mockImplementationOnce((_element, options) => {
+        expect(options.attr('data-qa', 'product-tag')).toBe(true)
+        return ''
+      })
+      .mockImplementationOnce((_element, options) => {
+        expect(options.attr('data-qa', 'product-tag')).toBe(true)
+        expect(options.slotCheck).toBe(true)
+        return 'x-product-tag[data-qa="product-tag"] span'
+      })
+
+    let selectors
+    document.addEventListener('click', (event) => {
+      selectors = getSelector(event, { dataAttribute: 'data-qa' })
+    }, { capture: true, once: true })
+
+    option.dispatchEvent(new window.MouseEvent('click', { bubbles: true, composed: true }))
+
+    expect(finder).toHaveBeenCalledTimes(2)
+    expect(selectors[0]).toEqual(['x-product-tag[data-qa="product-tag"] span'])
+  })
+
+  it('borrows unique text from an option ancestor path when the clicked child has none', () => {
+    const list = el('ul', { role: 'listbox' })
+    const item = el('li')
+    const option = el('a', { role: 'option' })
+    const body = el('span', { class: 'slds-media__body' })
+    const label = withText(el('span', { class: 'slds-listbox__option-text' }), 'Scale Testing Eng')
+    const metadata = withText(el('span', { class: 'slds-listbox__option-meta' }), 'Scale')
+    body.append(label, metadata)
+    option.appendChild(body)
+    item.appendChild(option)
+    list.appendChild(item)
+    append(list)
+    finder.mockReturnValue('ul[role="listbox"] li:nth-child(3) span.slds-listbox__option-meta')
+    SelectorComputer.mockImplementation(() => ({
+      getSelectors: jest.fn((node) => node === body ? [['text/Scale Testing EngScale']] : [])
+    }))
+
+    const selectors = getSelector({ target: metadata }, {}, metadata)
+
+    expect(selectors).toEqual([
+      ['ul[role="listbox"] li:nth-child(3) span.slds-listbox__option-meta'],
+      ['text/Scale Testing EngScale']
+    ])
+  })
+
+  it('does not borrow option text for a nested interactive control', () => {
+    const list = el('ul', { role: 'listbox' })
+    const option = el('a', { role: 'option' })
+    const body = el('span', { class: 'slds-media__body' })
+    const nestedButton = el('button')
+    const icon = el('span', { class: 'delete-icon' })
+    nestedButton.appendChild(icon)
+    body.appendChild(nestedButton)
+    option.appendChild(body)
+    list.appendChild(option)
+    append(list)
+    finder.mockReturnValue('#delete-icon')
+    SelectorComputer.mockImplementation(() => ({
+      getSelectors: jest.fn((node) => node === body ? [['text/Whole option text']] : [])
+    }))
+
+    const selectors = getSelector({ target: icon }, {}, icon)
+
+    expect(selectors).toEqual([['#delete-icon']])
+  })
+
+  it.each([
+    ['an empty contenteditable attribute', { contenteditable: '' }],
+    ['a combobox role', { role: 'combobox' }],
+    ['a treeitem role', { role: 'treeitem' }],
+    ['a keyboard-focusable custom control', { tabindex: '0' }]
+  ])('does not borrow option text through %s', (_description, interactiveAttributes) => {
+    const option = el('a', { role: 'option' })
+    const body = el('span', { class: 'slds-media__body' })
+    const nestedControl = el('div', interactiveAttributes)
+    const child = el('span', { class: 'control-child' })
+    nestedControl.appendChild(child)
+    body.appendChild(nestedControl)
+    option.appendChild(body)
+    append(option)
+    finder.mockReturnValue('#control-child')
+    SelectorComputer.mockImplementation(() => ({
+      getSelectors: jest.fn((node) => node === body ? [['text/Whole option text']] : [])
+    }))
+
+    const selectors = getSelector({ target: child }, {}, child)
+
+    expect(selectors).toEqual([['#control-child']])
+  })
+
+  it('borrows unique descendant text when the option surface itself is clicked', () => {
+    const list = el('ul', { role: 'listbox' })
+    const option = el('a', { role: 'option' })
+    const body = withText(el('span', { class: 'slds-media__body' }), 'Scale Testing EngScale')
+    option.appendChild(body)
+    list.appendChild(option)
+    append(list)
+    finder.mockReturnValue('ul[role="listbox"] li:nth-child(3) a[role="option"]')
+    SelectorComputer.mockImplementation(() => ({
+      getSelectors: jest.fn((node) => node === body ? [['text/Scale Testing EngScale']] : [])
+    }))
+
+    const selectors = getSelector({ target: option }, {}, option)
+
+    expect(selectors).toEqual([
+      ['ul[role="listbox"] li:nth-child(3) a[role="option"]'],
+      ['text/Scale Testing EngScale']
+    ])
+  })
+
+  it('bounds document-wide text uniqueness checks for a direct option click', () => {
+    const option = el('a', { role: 'option' })
+    for (let index = 0; index < 30; index++) {
+      option.appendChild(withText(el('span'), `Duplicate candidate ${index}`))
+    }
+    append(option)
+    finder.mockReturnValue('a[role="option"]:nth-child(1)')
+    const getSelectors = jest.fn().mockReturnValue([])
+    SelectorComputer.mockImplementation(() => ({ getSelectors }))
+
+    getSelector({ target: option }, {}, option)
+
+    // One check for the clicked option plus one ranked descendant.
+    expect(getSelectors.mock.calls.length).toBeLessThanOrEqual(2)
+  })
+
   it('uses a data-attribute shortcut selector when configured and present, skipping finder entirely', () => {
     const target = el('div', { 'data-recordid': 'rec-1' })
     append(target)
@@ -399,6 +557,26 @@ describe('getSelector', () => {
       expect(selectors.some((s) => s[0].startsWith('text/'))).toBe(false)
     })
 
+    it('excludes the changing text selector for a contenteditable editor', () => {
+      stubTextSelector('Description text changes while typing')
+      const target = el('div', { contenteditable: 'true' })
+      append(target)
+
+      const selectors = getSelector({ target }, {})
+
+      expect(selectors).toEqual([['#target']])
+    })
+
+    it('keeps a text selector when the contenteditable keyword is invalid', () => {
+      stubTextSelector('Ordinary visible text')
+      const target = el('div', { contenteditable: ' true ' })
+      append(target)
+
+      const selectors = getSelector({ target }, {})
+
+      expect(selectors).toContainEqual(['text/Ordinary visible text'])
+    })
+
     it('excludes the text selector for a password-type input', () => {
       stubTextSelector('should not appear')
       const target = el('input', { type: 'password' })
@@ -423,6 +601,25 @@ describe('getClickableTargetFromEvent', () => {
     append(target)
 
     expect(getClickableTargetFromEvent({ target })).toBe(target)
+  })
+
+  it('prefers the first visible element in composedPath over a retargeted event.target', () => {
+    const host = el('x-product-tag')
+    const shadow = host.attachShadow({ mode: 'open' })
+    host.getBoundingClientRect = () => ({ width: 100, height: 40 })
+    const innerOption = el('div', { role: 'option' })
+    innerOption.getBoundingClientRect = () => ({ width: 80, height: 20 })
+    shadow.appendChild(innerOption)
+    append(host)
+
+    let resolvedTarget
+    document.addEventListener('click', (event) => {
+      resolvedTarget = getClickableTargetFromEvent(event)
+    }, { capture: true, once: true })
+
+    innerOption.dispatchEvent(new window.MouseEvent('click', { bubbles: true, composed: true }))
+
+    expect(resolvedTarget).toBe(innerOption)
   })
 
   it('walks up to the first ancestor with visible dimensions', () => {

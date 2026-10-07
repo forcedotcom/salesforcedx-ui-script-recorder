@@ -56,6 +56,23 @@ describe('FrameAction', () => {
     ])
   })
 
+  it('uses parent-scoped text for a positional list option inside a frame', () => {
+    const action = buildAction()
+    const result = action.handle({
+      type: 'click',
+      frameSelectors: ['#frame1'],
+      selectors: [['#field li:nth-child(3) span.option'], ['text/Scale Testing EngScale']],
+      parentSelectors: [['#field ul[role="listbox"]']],
+      componentType: 'list'
+    })
+
+    expect(result).toEqual([
+      "const frame0 = page.frameLocator('#frame1');",
+      'const frameAction0 = frame0.locator(\'#field ul[role="listbox"] >> :text("Scale Testing EngScale")\');',
+      'await frameAction0.click()'
+    ])
+  })
+
   it('delegates to ClickAction when there is no frame-scoped selector', () => {
     const action = buildAction()
     const result = action.handle({ type: 'click', frameSelectors: ['#frame1'] })
@@ -87,7 +104,61 @@ describe('FrameAction', () => {
     expect(result).toEqual([
       "const frame0 = page.frameLocator('#frame1');",
       "const frameAction0 = frame0.locator('#inp');",
-      "await frameAction0.fill('#inp', 'hello');"
+      "await frameAction0.fill('hello');"
+    ])
+  })
+
+  it.each([
+    ['checkbox', true],
+    ['radio', false]
+  ])('sets a framed %s control instead of filling it', (inputType, value) => {
+    const action = buildAction()
+    const result = action.handle({
+      type: 'change',
+      inputType,
+      frameSelectors: ['#frame1'],
+      value,
+      selectors: [['#choice']]
+    })
+
+    expect(result).toEqual([
+      "const frame0 = page.frameLocator('#frame1');",
+      "const frameAction0 = frame0.locator('#choice');",
+      `await frameAction0.setChecked(${value} == true);`
+    ])
+  })
+
+  it('selects an option for a framed select instead of filling it', () => {
+    const action = buildAction()
+    const result = action.handle({
+      type: 'change',
+      inputType: 'select-one',
+      frameSelectors: ['#frame1'],
+      value: "Owner's choice",
+      selectors: [['#choice']]
+    })
+
+    expect(result).toEqual([
+      "const frame0 = page.frameLocator('#frame1');",
+      "const frameAction0 = frame0.locator('#choice');",
+      "await frameAction0.selectOption('Owner\\'s choice');"
+    ])
+  })
+
+  it('escapes a multiline rich-text value before filling inside a frame', () => {
+    const action = buildAction()
+    const result = action.handle({
+      type: 'change',
+      frameSelectors: ['iframe[title="Owner\'s frame"]'],
+      value: "Bob's\nsecond line",
+      selectors: [['#editor[data-label="Owner\'s"]']],
+      isContentEditable: true
+    })
+
+    expect(result).toEqual([
+      "const frame0 = page.frameLocator('iframe[title=\"Owner\\'s frame\"]');",
+      "const frameAction0 = frame0.locator('#editor[data-label=\"Owner\\'s\"]');",
+      "await frameAction0.fill('Bob\\'s\\nsecond line');"
     ])
   })
 
