@@ -118,6 +118,7 @@ describe('listSalesforceCliOrgs', () => {
       expect.any(Function)
     )
   })
+
 })
 
 describe('loginToNewOrgViaCli', () => {
@@ -187,6 +188,19 @@ describe('loginToNewOrgViaCli', () => {
       'sf',
       ['org', 'login', 'web', '--json'],
       expect.objectContaining({ env: expect.objectContaining({ PATH: '/mock/extended/path' }) }),
+      expect.any(Function)
+    )
+  })
+
+  it('passes an instance URL when one is provided', async () => {
+    mockExecFile(null, JSON.stringify({ status: 0, result: {} }), '')
+
+    await loginToNewOrgViaCli(undefined, { instanceUrl: 'https://test.salesforce.com' })
+
+    expect(execFile).toHaveBeenCalledWith(
+      'sf',
+      ['org', 'login', 'web', '--instance-url', 'https://test.salesforce.com', '--json'],
+      expect.anything(),
       expect.any(Function)
     )
   })

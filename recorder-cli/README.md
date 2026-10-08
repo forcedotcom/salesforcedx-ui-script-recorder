@@ -133,6 +133,8 @@ If you're already authenticated to an org through the [Salesforce CLI](https://d
 ```bash
 # One-time setup: authenticate an org with the CLI (handles MFA/SSO once)
 sf org login web
+# Sandboxes use the Salesforce test login host
+sf org login web --instance-url https://test.salesforce.com --alias my-sandbox
 sf org list   # confirm the org shows up as "Connected"
 
 # Record — the browser opens already logged into the org
