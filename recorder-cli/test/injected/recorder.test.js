@@ -146,7 +146,45 @@ describe('Recorder', () => {
       jest.runAllTimers()
 
       expect(recorder._recordEvent).toHaveBeenCalledTimes(1)
-      expect(recorder._recordEvent).toHaveBeenCalledWith(second, undefined)
+      expect(recorder._recordEvent).toHaveBeenCalledWith(second, undefined, expect.any(Number))
+    })
+
+    it('keeps the source occurrence time when deferred handling runs later', () => {
+      const { recorder, sendMessage } = makeRecorder()
+      const input = document.createElement('input')
+      input.id = 'deferred-input'
+      input.setAttribute('role', 'combobox')
+      input.value = 'ready'
+      document.body.append(input)
+      getSelector.mockReturnValue([['#deferred-input']])
+
+      jest.setSystemTime(new Date('2026-01-01T00:00:01.000Z'))
+      recorder._debounceRecordEvent({
+        isTrusted: true,
+        type: 'input',
+        target: input,
+        timeStamp: Number.NaN
+      })
+      jest.setSystemTime(new Date('2026-01-01T00:00:05.000Z'))
+      jest.runAllTimers()
+
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        eventTime: Date.parse('2026-01-01T00:00:01.000Z'),
+        orderEventTime: Date.parse('2026-01-01T00:00:01.000Z')
+      }))
+      input.remove()
+    })
+
+    it('normalizes fractional DOM timestamps to integer epoch milliseconds', () => {
+      const { recorder } = makeRecorder()
+      const relativeTimestamp = 123.875
+
+      expect(recorder._eventOccurrenceTime({ timeStamp: relativeTimestamp })).toBe(
+        Math.floor(performance.timeOrigin + relativeTimestamp)
+      )
+      expect(recorder._eventOccurrenceTime({ timeStamp: 1_800_000_000_000.875 })).toBe(
+        1_800_000_000_000
+      )
     })
 
     it('snapshots distinct open-shadow input targets before composedPath expires', () => {

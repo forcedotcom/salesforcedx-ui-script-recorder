@@ -20,9 +20,10 @@ export class FrameAction extends BaseAction {
 
   handle(step) {
     const frameActions = []
+    let delegatedAction = false
 
     if (step.frameSelectors?.length) {
-      const currentPage = this.stack.peek() || 'page'
+      const currentPage = this.context.page || this.stack.peek() || 'page'
       let frameLocatorString = currentPage
 
       for (const frameSelector of step.frameSelectors) {
@@ -43,7 +44,8 @@ export class FrameAction extends BaseAction {
             frameActions.push(`await frameAction${this.frameAction}.click()`)
           }
         } else {
-          const clickAction = new ClickAction(this.stack, this.context, this.commonCounter)
+          delegatedAction = true
+          const clickAction = new ClickAction(this.stack, this.context, this.commonCounter, this.data)
           const clickActionResults = clickAction.handle(step)
           if (clickActionResults) frameActions.push(...clickActionResults)
         }
@@ -61,7 +63,8 @@ export class FrameAction extends BaseAction {
             frameActions.push(`await frameAction${this.frameAction}.fill(${toJavaScriptStringLiteral(step.value)});`)
           }
         } else {
-          const changeAction = new ChangeAction(this.stack, this.context, this.commonCounter)
+          delegatedAction = true
+          const changeAction = new ChangeAction(this.stack, this.context, this.commonCounter, this.data)
           const changeActionResults = changeAction.handle(step)
           if (changeActionResults) frameActions.push(...changeActionResults)
         }
@@ -69,6 +72,13 @@ export class FrameAction extends BaseAction {
 
       this.frameAction++
       this.frameCount++
+
+      // Delegated handlers already manage navigation, popup, and close events.
+      if (delegatedAction) return frameActions
+
+      const actionsWithNavigation = this.wrapSamePageNavigation(step, frameActions, currentPage)
+      const actionsWithPopup = this.wrapNewTabOrWindow(step, actionsWithNavigation, currentPage)
+      return this.wrapTriggeredPageClose(step, actionsWithPopup, currentPage)
     }
 
     return frameActions

@@ -69,28 +69,162 @@ export class BaseAction {
   handleNewTabOrWindow(step, action, value) {
     const actions = []
     const selector = step.selectors?.find(sel => sel[0])
+    const activePage = this.context.page
+    const popupNavigation = step.assertedEvents?.find(event => event.isNewTabOrWindow === true)
 
-    if (step.assertedEvents?.some(event => event.isNewTabOrWindow)) {
-      actions.push(`const pageEvent${this.commonCounter.value} = ${this.context.page}.waitForEvent('popup');`)
+    if (popupNavigation) {
+      actions.push(`const pageEvent${this.commonCounter.value} = ${activePage}.waitForEvent('popup');`)
       actions.push(this._buildCommentString(step, ['tagName', 'inputType', 'value', 'parentSelectors'], selector))
       actions.push(this._buildActionString(step, action, selector?.[0], value, { await: true, ending: ';' }))
-      actions.push(`const tab${this.commonCounter.value} = await pageEvent${this.commonCounter.value};`)
-      this.stack.push(`tab${this.commonCounter.value}`)
-      this.context.page = `tab${this.commonCounter.value}`
+      const popupPage = `tab${this.commonCounter.value}`
+      actions.push(`const ${popupPage} = await pageEvent${this.commonCounter.value};`)
+      actions.push(this.buildFinalNavigationWait(popupPage, popupNavigation))
+      this.stack.push(popupPage)
+      if (typeof this.context.registerPage === 'function') {
+        this.context.registerPage(popupNavigation.targetTabId, popupPage)
+      } else {
+        this.context.page = popupPage
+      }
       this.commonCounter.value++
     } else {
-      const navigationEvent = step.assertedEvents?.find(event => event.type === 'navigation')
       actions.push(this._buildCommentString(step, ['tagName', 'inputType', 'value', 'parentSelectors'], selector))
       actions.push(this._buildActionString(step, action, selector?.[0], value, { await: true, ending: ';' }))
-      if (navigationEvent) {
-        actions.push(`await ${this.context.page}.waitForLoadState('domcontentloaded')`)
-      }
+      return this.wrapSamePageNavigation(step, actions, activePage)
     }
     return actions
   }
 
-  handleWindowOrTabClose() {
-    this.stack.pop()
-    this.context.page = this.stack.isEmpty() ? 'page' : this.stack.peek()
+  wrapSamePageNavigation(step, actions, activePage = this.context.page) {
+    const hasSamePageNavigation = step.assertedEvents?.some(event =>
+      event?.type === 'navigation' && event?.isNewTabOrWindow !== true
+    )
+    if (!hasSamePageNavigation) return actions
+
+    const navigationCounter = this.commonCounter.value++
+    actions.unshift(
+      `const navigationEvent${navigationCounter} = ${activePage}.waitForNavigation({ waitUntil: 'domcontentloaded' });`
+    )
+    actions.push(`await navigationEvent${navigationCounter};`)
+    const navigation = step.assertedEvents.find(event =>
+      event?.type === 'navigation' && event?.isNewTabOrWindow !== true
+    )
+    if (navigation?.url) actions.push(this.buildFinalNavigationWait(activePage, navigation))
+    return actions
+  }
+
+  buildFinalNavigationWait(pageName, navigation) {
+    if (!navigation?.url) return `await ${pageName}.waitForLoadState('domcontentloaded');`
+    return `await ${pageName}.waitForURL(url => url.href === ${toJavaScriptStringLiteral(navigation.url)}, { waitUntil: 'domcontentloaded' });`
+  }
+
+  findPrimaryActionIndex(actions, activePage = this.context.page) {
+    const actionPrefix = `await ${activePage}.`
+    return actions.findIndex(actionLine =>
+      typeof actionLine === 'string' &&
+      actionLine.startsWith(actionPrefix) &&
+      !actionLine.includes('.waitFor')
+    )
+  }
+
+  replacePrimaryAction(actions, replacement, activePage = this.context.page) {
+    const actionIndex = this.findPrimaryActionIndex(actions, activePage)
+    if (actionIndex !== -1) actions[actionIndex] = replacement
+    return actionIndex
+  }
+
+  insertBeforePrimaryAction(actions, insertion, activePage = this.context.page) {
+    const actionIndex = this.findPrimaryActionIndex(actions, activePage)
+    actions.splice(actionIndex === -1 ? actions.length : actionIndex, 0, insertion)
+  }
+
+  resolveClosingPage(step, fallbackPage = this.context.page) {
+    const closeEvent = step.assertedEvents?.find(event => event.type === 'windowOrTabClose')
+    if (typeof this.context.pageForTabId === 'function') {
+      return this.context.pageForTabId(closeEvent?.targetTabId) || fallbackPage
+    }
+    return fallbackPage
+  }
+
+  handleWindowOrTabClose(closingPage = this.context.page, activePage = this.context.page) {
+    const closingTabId = typeof this.context.tabIdForPage === 'function'
+      ? this.context.tabIdForPage(closingPage)
+      : null
+    if (typeof this.stack.remove === 'function') this.stack.remove(closingPage)
+    else this.stack.pop()
+    if (typeof this.context.unregisterPage === 'function') {
+      this.context.unregisterPage(closingTabId)
+    }
+    this.context.page = closingPage === activePage
+      ? (this.stack.isEmpty() ? 'page' : this.stack.peek())
+      : activePage
+  }
+
+  openNewPage(actions, openingPage = this.context.page, targetTabId = null) {
+    const pageCounter = this.commonCounter.value++
+    const pageName = `tab${pageCounter}`
+    actions.push(`const ${pageName} = await ${openingPage}.context().newPage();`)
+    this.stack.push(pageName)
+    if (typeof this.context.registerPage === 'function') {
+      this.context.registerPage(targetTabId, pageName)
+    } else {
+      this.context.page = pageName
+    }
+    return pageName
+  }
+
+  appendExplicitPageClose(step, actions, closingPage = this.context.page) {
+    if (!step.assertedEvents?.some(event => event.type === 'windowOrTabClose')) return actions
+
+    const activePage = this.context.page
+    const targetPage = this.resolveClosingPage(step, closingPage)
+
+    if (Number.isFinite(step.closeDelay) && step.closeDelay > 0) {
+      actions.push(`await delay(${Math.round(step.closeDelay)})`)
+    }
+    actions.push(`if (!${targetPage}.isClosed()) {`)
+    actions.push(`  await ${targetPage}.close();`)
+    actions.push('}')
+    this.handleWindowOrTabClose(targetPage, activePage)
+    return actions
+  }
+
+  wrapTriggeredPageClose(step, actions, triggeringPage = this.context.page) {
+    const openedNewPage = step.assertedEvents?.some(event => event.isNewTabOrWindow === true)
+    const isLegacyFlow = this.data != null && !(Number(this.data.timingVersion) >= 2)
+    if (openedNewPage || step.explicitClose === true || isLegacyFlow) {
+      // A later raw tab-close marker describes a user closing the popup; the
+      // triggering action cannot reproduce that close event on its own.
+      return this.appendExplicitPageClose(step, actions, this.context.page)
+    }
+    return this.wrapWindowOrTabClose(step, actions, triggeringPage)
+  }
+
+  wrapWindowOrTabClose(step, actions, closingPage = this.context.page) {
+    if (!step.assertedEvents?.some(event => event.type === 'windowOrTabClose')) return actions
+
+    const activePage = this.context.page
+    const targetPage = this.resolveClosingPage(step, closingPage)
+    const closeCounter = this.commonCounter.value++
+    actions.unshift(`const pageCloseEvent${closeCounter} = ${targetPage}.waitForEvent('close');`)
+    actions.push(`await pageCloseEvent${closeCounter};`)
+    this.handleWindowOrTabClose(targetPage, activePage)
+    return actions
+  }
+
+  wrapNewTabOrWindow(step, actions, openingPage = this.context.page) {
+    const popupNavigation = step.assertedEvents?.find(event => event.isNewTabOrWindow === true)
+    if (!popupNavigation) return actions
+
+    const popupCounter = this.commonCounter.value++
+    actions.unshift(`const pageEvent${popupCounter} = ${openingPage}.waitForEvent('popup');`)
+    actions.push(`const tab${popupCounter} = await pageEvent${popupCounter};`)
+    actions.push(this.buildFinalNavigationWait(`tab${popupCounter}`, popupNavigation))
+    this.stack.push(`tab${popupCounter}`)
+    if (typeof this.context.registerPage === 'function') {
+      this.context.registerPage(popupNavigation.targetTabId, `tab${popupCounter}`)
+    } else {
+      this.context.page = `tab${popupCounter}`
+    }
+    return actions
   }
 }

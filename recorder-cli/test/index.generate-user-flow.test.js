@@ -20,7 +20,7 @@ import fs from 'fs'
 import { createServer } from '../src/server.js'
 import { buildInjectedScript } from '../src/build.js'
 import { convertToPlaywright } from '../src/playwright-converter.js'
-import { startRecording } from '../src/index.js'
+import { generateUserFlow, startRecording } from '../src/index.js'
 import { createFakeBrowser, createFakeServerInstance, flushAll, baseOptions } from './helpers/fakePlaywright.js'
 
 describe('startRecording -> generateUserFlow / filterSteps (via recorded message events)', () => {
@@ -56,6 +56,34 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
     fakeServerInstance.events.emit('message', { eventTime: Date.now(), ...event })
   }
 
+  it('keeps a later page.goto completion baseline when its redirect marker completed earlier', () => {
+    const flow = generateUserFlow([
+      {
+        action: 'GOTO',
+        href: 'https://example.com/start',
+        eventTime: 1000,
+        endEventTime: 6000,
+        tabId: 'main'
+      },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/redirected',
+        eventTime: 2000,
+        tabId: 'main'
+      },
+      {
+        action: 'click',
+        selectors: [['#after-redirect']],
+        tagName: 'BUTTON',
+        eventTime: 7000,
+        tabId: 'main'
+      }
+    ], {})
+
+    const afterRedirect = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#after-redirect')
+    expect(afterRedirect.duration).toBe(1000)
+  })
+
   async function writtenUserFlow() {
     fakeServerInstance.events.emit('overlay-action', { action: 'STOP' })
     await flushAll(5)
@@ -85,7 +113,8 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
     const flow = await writtenUserFlow()
 
     const reloadStep = flow.steps.find((s) => s.type === 'reload')
-    expect(reloadStep.assertedEvents).toEqual([{ type: 'windowOrTabClose' }])
+    // A close from a different tab must not overwrite this reload's navigation.
+    expect(reloadStep.assertedEvents).toEqual([{ type: 'navigation', url: '', title: '' }])
 
     const dblStep = flow.steps.find((s) => s.type === 'doubleClick')
     expect(dblStep).toMatchObject({
@@ -99,8 +128,17 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
 
     const gotos = flow.steps.filter((s) => s.type === 'navigate')
     expect(gotos).toHaveLength(4)
-    // The tab-2 GOTO's assertedEvents get overwritten by the WINDOW_OR_TAB_CLOSED that follows it.
-    expect(gotos[1].assertedEvents).toEqual([{ type: 'windowOrTabClose' }])
+    expect(gotos[1].assertedEvents).toEqual([{
+      type: 'navigation',
+      url: 'https://example.com/tab2',
+      title: '',
+      isNewTabOrWindow: true,
+      targetTabId: 'tab-2'
+    }])
+    expect(flow.steps).toContainEqual(expect.objectContaining({
+      type: 'close',
+      tabId: 'tab-2'
+    }))
     expect(gotos[2].assertedEvents[0].isNewTabOrWindow).toBe(true)
     expect(gotos[3].assertedEvents[0].isNewTabOrWindow).toBeUndefined()
   })
@@ -235,8 +273,16 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
   })
 
   it('dedupes a delayed duplicate change emitted immediately before its dropdown option click', async () => {
-    const firstEventTime = Date.now()
+    // Keep the synthetic interaction timeline after the initial page.goto()
+    // completion timestamp captured during test setup.
+    const firstEventTime = Date.now() + 1000
     const stableAriaSelector = ['aria/Product Tag[role="textbox"]']
+    emit({
+      action: 'click',
+      eventTime: firstEventTime - 200,
+      selectors: [['#open-product-tag']],
+      tagName: 'BUTTON'
+    })
     emit({
       action: 'input',
       eventTime: firstEventTime,
@@ -264,9 +310,56 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
 
     const flow = await writtenUserFlow()
     const changes = flow.steps.filter((step) => step.type === 'change' && step.tagName === 'INPUT')
+    const optionClick = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#product-tag-option')
 
     expect(changes).toHaveLength(1)
-    expect(changes[0].selectors).toEqual([['#product-tag-before-input'], stableAriaSelector])
+    expect(changes[0]).toMatchObject({
+      selectors: [['#product-tag-before-input'], stableAriaSelector],
+      duration: 200
+    })
+    expect(optionClick.duration).toBe(3209)
+  })
+
+  it('recomputes delays between retained actions after duplicate changes and ignored keyboard events are filtered', async () => {
+    const firstEventTime = Date.now()
+    const fieldSelectors = [['#assignee'], ['aria/Assigned To[role="combobox"]']]
+    emit({
+      action: 'click',
+      eventTime: firstEventTime,
+      selectors: [['#open-assignee']],
+      tagName: 'BUTTON'
+    })
+    emit({
+      action: 'input',
+      eventTime: firstEventTime + 100,
+      selectors: fieldSelectors,
+      tagName: 'INPUT',
+      inputType: 'text',
+      value: 'S'
+    })
+    emit({ action: 'keydown', eventTime: firstEventTime + 250, key: 'u', keyCode: 85 })
+    emit({ action: 'keyup', eventTime: firstEventTime + 300, key: 'u', keyCode: 85 })
+    emit({
+      action: 'input',
+      eventTime: firstEventTime + 400,
+      selectors: fieldSelectors,
+      tagName: 'INPUT',
+      inputType: 'text',
+      value: 'Suraj Varma'
+    })
+    emit({
+      action: 'click',
+      eventTime: firstEventTime + 1400,
+      selectors: [['#suraj-option']],
+      tagName: 'SPAN'
+    })
+
+    const flow = await writtenUserFlow()
+    const assigneeChange = flow.steps.find((step) => step.type === 'change' && step.value === 'Suraj Varma')
+    const optionClick = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#suraj-option')
+
+    expect(assigneeChange.duration).toBe(400)
+    expect(optionClick.duration).toBe(1000)
   })
 
   it('keeps separate changes when transient selectors share no stable alternative', async () => {
@@ -470,7 +563,10 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
     const flow = await writtenUserFlow()
 
     const keyDowns = flow.steps.filter((s) => s.type === 'keyDown')
-    expect(keyDowns).toEqual([{ type: 'keyDown', target: 'main', key: 'Enter' }, { type: 'keyDown', target: 'main', key: 'Escape' }])
+    expect(keyDowns).toEqual([
+      expect.objectContaining({ type: 'keyDown', target: 'main', key: 'Enter' }),
+      expect.objectContaining({ type: 'keyDown', target: 'main', key: 'Escape' })
+    ])
     expect(flow.steps.some((s) => s.type === 'keyUp')).toBe(false)
 
     const tabChange = flow.steps.find((s) => s.selectors?.[0]?.[0] === '#tab')
@@ -575,7 +671,624 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
     const flow = await writtenUserFlow()
 
     const anchorStep = flow.steps.find((s) => s.type === 'doubleClick')
-    expect(anchorStep.assertedEvents).toEqual([{ type: 'navigation', url: 'https://example.com/tab3', title: 'Tab 3', isNewTabOrWindow: true }])
+    expect(anchorStep.assertedEvents).toEqual([{
+      type: 'navigation',
+      url: 'https://example.com/tab3',
+      title: 'Tab 3',
+      isNewTabOrWindow: true,
+      targetTabId: 'tab-3'
+    }])
+  })
+
+  it('keeps the new-tab marker when a popup redirects before the next action', async () => {
+    emit({ action: 'click', selectors: [['#open-popup']], tagName: 'A', tabId: undefined })
+    emit({
+      action: 'NAVIGATION',
+      value: 'https://example.com/popup-start',
+      title: 'Popup start',
+      tabId: 'popup-1'
+    })
+    emit({
+      action: 'NAVIGATION',
+      value: 'https://example.com/popup-final',
+      title: 'Popup final',
+      tabId: 'popup-1'
+    })
+
+    const flow = await writtenUserFlow()
+    const openPopup = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#open-popup')
+
+    expect(openPopup.assertedEvents).toEqual([{
+      type: 'navigation',
+      url: 'https://example.com/popup-final',
+      title: 'Popup final',
+      isNewTabOrWindow: true,
+      targetTabId: 'popup-1'
+    }])
+  })
+
+  it('measures post-navigation delay from lifecycle completion instead of the triggering action', async () => {
+    const firstEventTime = Date.now()
+    emit({
+      action: 'click',
+      eventTime: firstEventTime,
+      selectors: [['#navigate']],
+      tagName: 'A'
+    })
+    emit({
+      action: 'NAVIGATION',
+      eventTime: firstEventTime + 50,
+      value: 'https://example.com/loaded',
+      title: 'Loaded'
+    })
+    emit({
+      action: 'click',
+      eventTime: firstEventTime + 40050,
+      selectors: [['#after-load']],
+      tagName: 'BUTTON'
+    })
+
+    const flow = await writtenUserFlow()
+    const afterLoadClick = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#after-load')
+
+    expect(afterLoadClick.duration).toBe(40000)
+  })
+
+  it('does not dedupe changes across a navigation boundary', async () => {
+    const firstEventTime = Date.now()
+    const selectors = [['#search']]
+    emit({
+      action: 'input',
+      eventTime: firstEventTime,
+      selectors,
+      tagName: 'INPUT',
+      inputType: 'text',
+      value: 'before navigation'
+    })
+    emit({
+      action: 'NAVIGATION',
+      eventTime: firstEventTime + 50,
+      value: 'https://example.com/loaded',
+      title: 'Loaded'
+    })
+    emit({
+      action: 'input',
+      eventTime: firstEventTime + 1000,
+      selectors,
+      tagName: 'INPUT',
+      inputType: 'text',
+      value: 'after navigation'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter((step) => step.type === 'change')
+
+    expect(changes).toHaveLength(2)
+    expect(changes[0].assertedEvents).toEqual([
+      { type: 'navigation', url: 'https://example.com/loaded', title: 'Loaded' }
+    ])
+    expect(changes[1].duration).toBe(950)
+  })
+
+  it('preserves a navigation boundary when a matching keyUp is folded into keyDown', async () => {
+    const firstEventTime = Date.now()
+    emit({ action: 'keydown', eventTime: firstEventTime, key: 'Enter', keyCode: 13 })
+    emit({ action: 'keyup', eventTime: firstEventTime + 10, key: 'Enter', keyCode: 13 })
+    emit({
+      action: 'NAVIGATION',
+      eventTime: firstEventTime + 20,
+      value: 'https://example.com/results',
+      title: 'Results'
+    })
+    emit({
+      action: 'click',
+      eventTime: firstEventTime + 5000,
+      selectors: [['#after-enter-navigation']],
+      tagName: 'BUTTON'
+    })
+
+    const flow = await writtenUserFlow()
+    const enter = flow.steps.find((step) => step.type === 'keyDown' && step.key === 'Enter')
+    const afterNavigation = flow.steps.find(
+      (step) => step.selectors?.[0]?.[0] === '#after-enter-navigation'
+    )
+
+    expect(enter.assertedEvents).toEqual([
+      { type: 'navigation', url: 'https://example.com/results', title: 'Results' }
+    ])
+    expect(afterNavigation.duration).toBe(4980)
+  })
+
+  it('measures the next delay from key release when folding keyDown and keyUp', async () => {
+    const firstEventTime = Date.now()
+    emit({ action: 'click', eventTime: firstEventTime, selectors: [['#before-key']], tagName: 'BUTTON' })
+    emit({ action: 'keydown', eventTime: firstEventTime + 100, key: 'Enter', keyCode: 13 })
+    emit({ action: 'keyup', eventTime: firstEventTime + 1100, key: 'Enter', keyCode: 13 })
+    emit({
+      action: 'click',
+      eventTime: firstEventTime + 1200,
+      selectors: [['#after-key']],
+      tagName: 'BUTTON'
+    })
+
+    const flow = await writtenUserFlow()
+    const enter = flow.steps.find((step) => step.type === 'keyDown' && step.key === 'Enter')
+    const afterKey = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#after-key')
+
+    expect(enter.duration).toBe(100)
+    expect(enter.keyPressDuration).toBe(1000)
+    expect(afterKey.duration).toBe(100)
+  })
+
+  it('keeps later delays stable when event timestamps arrive out of order', async () => {
+    const firstEventTime = Date.now()
+    emit({ action: 'click', eventTime: firstEventTime, selectors: [['#first']], tagName: 'BUTTON' })
+    emit({ action: 'click', eventTime: firstEventTime - 100, selectors: [['#late']], tagName: 'BUTTON' })
+    emit({ action: 'click', eventTime: firstEventTime + 100, selectors: [['#third']], tagName: 'BUTTON' })
+
+    const flow = await writtenUserFlow()
+    const clicks = flow.steps.filter((step) => step.type === 'click')
+
+    expect(clicks.map((step) => step.selectors[0][0])).toEqual(['#first', '#late', '#third'])
+    expect(clicks.slice(1).map((step) => step.duration)).toEqual([0, 100])
+  })
+
+  it('measures the next delay from the recorded tab-close time', async () => {
+    const firstEventTime = Date.now()
+    emit({
+      action: 'click',
+      eventTime: firstEventTime,
+      selectors: [['#close-tab']],
+      tagName: 'BUTTON'
+    })
+    emit({
+      action: 'WINDOW_OR_TAB_CLOSED',
+      eventTime: firstEventTime + 1000,
+      tabId: undefined
+    })
+    emit({
+      action: 'click',
+      eventTime: firstEventTime + 1500,
+      selectors: [['#after-close']],
+      tagName: 'BUTTON'
+    })
+
+    const flow = await writtenUserFlow()
+    const afterClose = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#after-close')
+
+    expect(flow.timingVersion).toBe(2)
+    expect(afterClose.duration).toBe(500)
+  })
+
+  it('preserves popup dwell time separately from the delay after closing it', () => {
+    const flow = generateUserFlow([
+      {
+        action: 'GOTO',
+        href: 'https://example.com',
+        eventTime: 0,
+        endEventTime: 0,
+        tabId: 'main'
+      },
+      {
+        action: 'click',
+        selectors: [['#open-popup']],
+        tagName: 'A',
+        eventTime: 1000,
+        tabId: 'main'
+      },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/popup',
+        eventTime: 1100,
+        tabId: 'popup'
+      },
+      {
+        action: 'WINDOW_OR_TAB_CLOSED',
+        eventTime: 6100,
+        tabId: 'popup'
+      },
+      {
+        action: 'click',
+        selectors: [['#after-popup']],
+        tagName: 'BUTTON',
+        eventTime: 7000,
+        tabId: 'main'
+      }
+    ], {})
+
+    const openPopup = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#open-popup')
+    const closePopup = flow.steps.find((step) => step.type === 'close' && step.tabId === 'popup')
+    const afterPopup = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#after-popup')
+
+    expect(openPopup.closeDelay).toBeUndefined()
+    expect(closePopup.duration).toBe(5000)
+    expect(afterPopup.duration).toBe(900)
+  })
+
+  it('marks a manual popup close explicitly after interactions inside the popup', () => {
+    const flow = generateUserFlow([
+      { action: 'GOTO', href: 'https://example.com', eventTime: 0, endEventTime: 0, tabId: 'main' },
+      {
+        action: 'click',
+        selectors: [['#open-popup']],
+        tagName: 'A',
+        eventTime: 1000,
+        tabId: 'main'
+      },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/popup',
+        eventTime: 1100,
+        tabId: 'popup'
+      },
+      {
+        action: 'click',
+        selectors: [['#inside-popup']],
+        tagName: 'BUTTON',
+        eventTime: 2000,
+        tabId: 'popup'
+      },
+      { action: 'WINDOW_OR_TAB_CLOSED', eventTime: 6000, tabId: 'popup' },
+      {
+        action: 'click',
+        selectors: [['#back-on-opener']],
+        tagName: 'BUTTON',
+        eventTime: 7000,
+        tabId: 'main'
+      }
+    ], {})
+
+    const insidePopup = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#inside-popup')
+    const closePopup = flow.steps.find((step) => step.type === 'close' && step.tabId === 'popup')
+    const backOnOpener = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#back-on-opener')
+
+    expect(insidePopup.assertedEvents).toBeUndefined()
+    expect(closePopup).toMatchObject({ type: 'close', tabId: 'popup', duration: 4000 })
+    expect(backOnOpener.duration).toBe(1000)
+  })
+
+  it('associates navigation and close lifecycle events with actions from the matching tab', () => {
+    const flow = generateUserFlow([
+      { action: 'GOTO', href: 'https://example.com', eventTime: 0, endEventTime: 0, tabId: 'main' },
+      {
+        action: 'click',
+        selectors: [['#open-popup']],
+        tagName: 'BUTTON',
+        eventTime: 100,
+        tabId: 'main'
+      },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/popup',
+        eventTime: 150,
+        tabId: 'popup',
+        openerTabId: 'main'
+      },
+      {
+        action: 'click',
+        selectors: [['#popup-before-main-nav']],
+        tagName: 'BUTTON',
+        eventTime: 200,
+        tabId: 'popup'
+      },
+      {
+        action: 'click',
+        selectors: [['#trigger-main-nav']],
+        tagName: 'A',
+        eventTime: 300,
+        tabId: 'main'
+      },
+      {
+        action: 'click',
+        selectors: [['#last-popup-action']],
+        tagName: 'BUTTON',
+        eventTime: 350,
+        tabId: 'popup'
+      },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/main-next',
+        eventTime: 400,
+        tabId: 'main'
+      },
+      { action: 'WINDOW_OR_TAB_CLOSED', eventTime: 500, tabId: 'popup' }
+    ], {})
+
+    const mainTrigger = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#trigger-main-nav')
+    const lastPopupAction = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#last-popup-action')
+    const closePopup = flow.steps.find((step) => step.type === 'close' && step.tabId === 'popup')
+    const unrelatedPopupAction = flow.steps.find(
+      (step) => step.selectors?.[0]?.[0] === '#popup-before-main-nav'
+    )
+
+    expect(mainTrigger.assertedEvents).toEqual([{
+      type: 'navigation',
+      url: 'https://example.com/main-next',
+      title: ''
+    }])
+    expect(lastPopupAction.assertedEvents).toBeUndefined()
+    expect(closePopup).toMatchObject({ type: 'close', tabId: 'popup', duration: 100 })
+    expect(unrelatedPopupAction.assertedEvents).toBeUndefined()
+  })
+
+  it('keeps an interleaved popup close at its global chronological position', () => {
+    const flow = generateUserFlow([
+      { action: 'GOTO', href: 'https://example.com', eventTime: 0, endEventTime: 0, tabId: 'main' },
+      {
+        action: 'click', selectors: [['#open']], tagName: 'BUTTON', eventTime: 100, tabId: 'main'
+      },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/popup',
+        eventTime: 150,
+        tabId: 'popup',
+        openerTabId: 'main'
+      },
+      {
+        action: 'click', selectors: [['#popup-action']], tagName: 'BUTTON', eventTime: 200, tabId: 'popup'
+      },
+      {
+        action: 'click', selectors: [['#main-before-close']], tagName: 'BUTTON', eventTime: 300, tabId: 'main'
+      },
+      { action: 'WINDOW_OR_TAB_CLOSED', eventTime: 400, tabId: 'popup' },
+      {
+        action: 'click', selectors: [['#main-after-close']], tagName: 'BUTTON', eventTime: 500, tabId: 'main'
+      }
+    ], {})
+
+    const popupAction = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#popup-action')
+    const beforeClose = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#main-before-close')
+    const closePopup = flow.steps.find((step) => step.type === 'close' && step.tabId === 'popup')
+    const afterClose = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#main-after-close')
+
+    expect(popupAction.assertedEvents).toBeUndefined()
+    expect(beforeClose).toMatchObject({ tabId: 'main' })
+    expect(beforeClose.assertedEvents).toBeUndefined()
+    expect(closePopup).toMatchObject({ type: 'close', tabId: 'popup', duration: 100 })
+    expect(afterClose.duration).toBe(100)
+  })
+
+  it('merges delayed cross-tab actions by source time before placing lifecycle events', () => {
+    const captured = (event, time, sequence, streamId) => ({
+      ...event,
+      __orderEventTime: time,
+      __orderPriority: 0,
+      __recordingSequence: sequence,
+      __streamId: streamId
+    })
+    const lifecycle = (event, time, sequence) => ({
+      ...event,
+      __orderEventTime: time,
+      __orderPriority: 1,
+      __recordingSequence: sequence
+    })
+    const flow = generateUserFlow([
+      captured({
+        action: 'GOTO', href: 'https://example.com', eventTime: 0, endEventTime: 0, tabId: 'main'
+      }, 0, 0, 'main-document'),
+      captured({
+        action: 'click', selectors: [['#open']], tagName: 'BUTTON', eventTime: 100, tabId: 'main'
+      }, 100, 1, 'main-document'),
+      lifecycle({
+        action: 'NAVIGATION', value: 'https://example.com/popup', eventTime: 110,
+        tabId: 'popup', openerTabId: 'main'
+      }, 110, 2),
+      // This newer main-page action arrives before the popup's older message.
+      captured({
+        action: 'click', selectors: [['#main-after-close']], tagName: 'BUTTON',
+        eventTime: 500, tabId: 'main'
+      }, 500, 3, 'main-document'),
+      captured({
+        action: 'click', selectors: [['#popup-action']], tagName: 'BUTTON',
+        eventTime: 200, tabId: 'popup'
+      }, 200, 4, 'popup-document'),
+      lifecycle({ action: 'WINDOW_OR_TAB_CLOSED', eventTime: 400, tabId: 'popup' }, 400, 5)
+    ], {})
+
+    const replayOrder = flow.steps
+      .filter((step) => step.type === 'click' || step.type === 'close')
+      .map((step) => step.type === 'close' ? `close:${step.tabId}` : step.selectors[0][0])
+    const closePopup = flow.steps.find((step) => step.type === 'close')
+    const afterClose = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#main-after-close')
+
+    expect(replayOrder).toEqual(['#open', '#popup-action', 'close:popup', '#main-after-close'])
+    expect(closePopup.duration).toBe(200)
+    expect(afterClose.duration).toBe(100)
+  })
+
+  it('merges old and new document streams independently even when they share a tab id', () => {
+    const flow = generateUserFlow([
+      {
+        action: 'GOTO', href: 'https://example.com', eventTime: 0, endEventTime: 0, tabId: 'main',
+        __orderEventTime: 0, __orderPriority: 0, __recordingSequence: 0
+      },
+      // The new document's message reaches the server first.
+      {
+        action: 'click', selectors: [['#new-document']], tagName: 'BUTTON', eventTime: 500,
+        tabId: 'main', __streamId: 'new-document', __orderEventTime: 500,
+        __orderPriority: 0, __recordingSequence: 1
+      },
+      {
+        action: 'click', selectors: [['#old-document-trigger']], tagName: 'A', eventTime: 100,
+        tabId: 'main', __streamId: 'old-document', __orderEventTime: 100,
+        __orderPriority: 0, __recordingSequence: 2
+      },
+      {
+        action: 'NAVIGATION', value: 'https://example.com/next', eventTime: 300, tabId: 'main',
+        __orderEventTime: 300, __orderPriority: 1, __recordingSequence: 3
+      }
+    ], {})
+
+    const clicks = flow.steps.filter((step) => step.type === 'click')
+    expect(clicks.map((step) => step.selectors[0][0])).toEqual([
+      '#old-document-trigger',
+      '#new-document'
+    ])
+    expect(clicks[0].assertedEvents).toEqual([{
+      type: 'navigation',
+      url: 'https://example.com/next',
+      title: ''
+    }])
+    expect(clicks[1].duration).toBe(200)
+  })
+
+  it('represents consecutive popup closes as separate timed steps', () => {
+    const flow = generateUserFlow([
+      { action: 'GOTO', href: 'https://example.com', eventTime: 0, endEventTime: 0, tabId: 'main' },
+      { action: 'click', selectors: [['#open-one']], tagName: 'BUTTON', eventTime: 100, tabId: 'main' },
+      {
+        action: 'NAVIGATION', value: 'https://example.com/one', eventTime: 110,
+        tabId: 'popup-1', openerTabId: 'main'
+      },
+      { action: 'click', selectors: [['#open-two']], tagName: 'BUTTON', eventTime: 200, tabId: 'main' },
+      {
+        action: 'NAVIGATION', value: 'https://example.com/two', eventTime: 210,
+        tabId: 'popup-2', openerTabId: 'main'
+      },
+      { action: 'WINDOW_OR_TAB_CLOSED', eventTime: 300, tabId: 'popup-1' },
+      { action: 'WINDOW_OR_TAB_CLOSED', eventTime: 400, tabId: 'popup-2' }
+    ], {})
+
+    expect(flow.steps.filter((step) => step.type === 'close')).toEqual([
+      { type: 'close', target: 'main', tabId: 'popup-1', duration: 90 },
+      { type: 'close', target: 'main', tabId: 'popup-2', duration: 100 }
+    ])
+  })
+
+  it('keeps a popup close replayable when a screenshot is the preceding raw event', () => {
+    const flow = generateUserFlow([
+      { action: 'GOTO', href: 'https://example.com', eventTime: 0, endEventTime: 0, tabId: 'main' },
+      { action: 'click', selectors: [['#open']], tagName: 'BUTTON', eventTime: 100, tabId: 'main' },
+      {
+        action: 'NAVIGATION', value: 'https://example.com/popup', eventTime: 110,
+        tabId: 'popup', openerTabId: 'main'
+      },
+      { action: 'click', selectors: [['#inside']], tagName: 'BUTTON', eventTime: 200, tabId: 'popup' },
+      { action: 'SCREENSHOT', value: 'before-close' },
+      { action: 'WINDOW_OR_TAB_CLOSED', eventTime: 500, tabId: 'popup' }
+    ], {})
+
+    expect(flow.steps.find((step) => step.type === 'close')).toEqual({
+      type: 'close', target: 'main', tabId: 'popup', duration: 300
+    })
+  })
+
+  it('uses the latest lifecycle end when navigation completes after keyup', () => {
+    const flow = generateUserFlow([
+      { action: 'keydown', key: 'Enter', keyCode: 13, eventTime: 100 },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/results',
+        eventTime: 1000,
+        tabId: 'main'
+      },
+      { action: 'keyup', key: 'Enter', keyCode: 13, eventTime: 200 },
+      {
+        action: 'click',
+        selectors: [['#after-navigation']],
+        tagName: 'BUTTON',
+        eventTime: 1100,
+        tabId: 'main'
+      }
+    ], {})
+
+    const afterNavigation = flow.steps.find((step) => step.selectors?.[0]?.[0] === '#after-navigation')
+    expect(afterNavigation.duration).toBe(100)
+  })
+
+  it('does not turn keyup into a completion time for an unfinished navigation', () => {
+    const flow = generateUserFlow([
+      { action: 'GOTO', href: 'https://example.com', eventTime: 0, endEventTime: 0, tabId: 'main' },
+      { action: 'keydown', key: 'Enter', keyCode: 13, eventTime: 100 },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/results',
+        tabId: 'main'
+      },
+      { action: 'keyup', key: 'Enter', keyCode: 13, eventTime: 200 },
+      {
+        action: 'click',
+        selectors: [['#after-unfinished-navigation']],
+        tagName: 'BUTTON',
+        eventTime: 5000,
+        tabId: 'main'
+      }
+    ], {})
+
+    const enter = flow.steps.find((step) => step.type === 'keyDown')
+    const afterNavigation = flow.steps.find(
+      (step) => step.selectors?.[0]?.[0] === '#after-unfinished-navigation'
+    )
+
+    expect(enter.keyPressDuration).toBe(100)
+    expect(afterNavigation.duration).toBe(0)
+  })
+
+  it('measures a folded keyboard popup close from navigation completion', () => {
+    const flow = generateUserFlow([
+      { action: 'GOTO', href: 'https://example.com', eventTime: 0, endEventTime: 0, tabId: 'main' },
+      { action: 'keydown', key: 'Enter', keyCode: 13, eventTime: 100 },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/popup',
+        eventTime: 1000,
+        tabId: 'popup'
+      },
+      { action: 'keyup', key: 'Enter', keyCode: 13, eventTime: 200 },
+      { action: 'WINDOW_OR_TAB_CLOSED', eventTime: 6000, tabId: 'popup' },
+      {
+        action: 'click',
+        selectors: [['#after-keyboard-popup']],
+        tagName: 'BUTTON',
+        eventTime: 7000,
+        tabId: 'main'
+      }
+    ], {})
+
+    const enter = flow.steps.find((step) => step.type === 'keyDown')
+    const closePopup = flow.steps.find((step) => step.type === 'close' && step.tabId === 'popup')
+    const afterPopup = flow.steps.find(
+      (step) => step.selectors?.[0]?.[0] === '#after-keyboard-popup'
+    )
+
+    expect(enter).toMatchObject({ keyPressDuration: 100 })
+    expect(closePopup).toMatchObject({ type: 'close', tabId: 'popup', duration: 5000 })
+    expect(afterPopup.duration).toBe(1000)
+  })
+
+  it('collapses keyboard popup redirects to one final new-tab navigation', () => {
+    const flow = generateUserFlow([
+      {
+        action: 'GOTO',
+        href: 'https://example.com',
+        eventTime: 0,
+        endEventTime: 0,
+        tabId: 'main'
+      },
+      { action: 'keydown', key: 'Enter', keyCode: 13, eventTime: 100 },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/popup-start',
+        eventTime: 150,
+        tabId: 'popup'
+      },
+      { action: 'keyup', key: 'Enter', keyCode: 13, eventTime: 200 },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/popup-final',
+        eventTime: 250,
+        tabId: 'popup'
+      }
+    ], {})
+
+    const enter = flow.steps.find((step) => step.type === 'keyDown')
+    expect(enter.assertedEvents).toEqual([{
+      type: 'navigation',
+      url: 'https://example.com/popup-final',
+      title: '',
+      isNewTabOrWindow: true,
+      targetTabId: 'popup'
+    }])
   })
 
   it('ignores a NAVIGATION event when the only preceding step is the initial viewport', async () => {

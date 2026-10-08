@@ -263,6 +263,7 @@ export class Recorder {
     // now so deferred input/key events do not collapse to a shadow host.
     const target = getClickableTargetFromEvent(e) || e.target
     const contentEditableHost = this._getContentEditableHost(target)
+    const occurrenceTime = this._eventOccurrenceTime(e)
 
     if (e.type === eventsToRecord.KEYDOWN) {
       this._hasPendingContentEditableInput = false
@@ -272,7 +273,7 @@ export class Recorder {
       // (notably Enter or Backspace).
       clearTimeout(this._debounceTimer)
       this._hasPendingContentEditableInput = true
-      this._recordEvent(e, contentEditableHost)
+      this._recordEvent(e, contentEditableHost, occurrenceTime)
       return
     } else if (e.type === eventsToRecord.KEYUP && this._hasPendingContentEditableInput) {
       // A reactive component may replace the editing host between input and
@@ -282,7 +283,22 @@ export class Recorder {
     }
 
     clearTimeout(this._debounceTimer)
-    this._debounceTimer = setTimeout(() => this._recordEvent(e, target), 0)
+    this._debounceTimer = setTimeout(() => this._recordEvent(e, target, occurrenceTime), 0)
+  }
+
+  _eventOccurrenceTime(e) {
+    if (Number.isFinite(e?.timeStamp)) {
+      // CDP lifecycle callbacks are timestamped with Date.now(), while DOM
+      // event timestamps can contain sub-millisecond fractions. Keep both
+      // transports on the same integer epoch-millisecond clock so an action
+      // from 1000.8 ms cannot be sorted after a lifecycle event captured in
+      // the same 1000 ms tick.
+      if (e.timeStamp > 1e12) return Math.floor(e.timeStamp)
+      if (Number.isFinite(globalThis.performance?.timeOrigin)) {
+        return Math.floor(globalThis.performance.timeOrigin + e.timeStamp)
+      }
+    }
+    return Date.now()
   }
 
   _sendMessage(msg) {
@@ -297,7 +313,7 @@ export class Recorder {
     }
   }
 
-  _recordEvent(e, capturedTarget) {
+  _recordEvent(e, capturedTarget, occurrenceTime = this._eventOccurrenceTime(e)) {
     // Only record user-initiated actions
     if (!e.isTrusted) return
 
@@ -347,7 +363,8 @@ export class Recorder {
         assertionType: textContent ? 'containsText' : 'visible',
         textContent: textContent || null,
         tagName: target.tagName,
-        eventTime: Date.now()
+        eventTime: occurrenceTime,
+        orderEventTime: occurrenceTime
       })
       this._lastRecordedEvent = this._snapshotRecordedEvent(e, target)
 
@@ -400,7 +417,8 @@ export class Recorder {
         coordinates: pointerSnapshot
           ? this._getPointerSnapshotCoordinates(e, pointerSnapshot, currentTarget)
           : this._getCoordinates(e, target),
-        eventTime: Date.now(),
+        eventTime: occurrenceTime,
+        orderEventTime: occurrenceTime,
         type: e.type,
         key: e.key,
         recordingTargetId: this._getRecordingTargetId(target)

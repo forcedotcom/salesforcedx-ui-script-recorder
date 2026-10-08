@@ -133,6 +133,47 @@ describe('ChangeAction', () => {
     ])
   })
 
+  it('replaces the fill without dropping a parameterised navigation wait', () => {
+    const step = {
+      type: 'change',
+      value: 'bob',
+      inputType: 'text',
+      selectors: [['#inp']],
+      params: { parameterise: true, paramName: 'myParam' },
+      assertedEvents: [{ type: 'navigation' }]
+    }
+
+    const result = buildAction().handle(step)
+
+    expect(result).toEqual([
+      "const navigationEvent0 = page.waitForNavigation({ waitUntil: 'domcontentloaded' });",
+      '// inputType = "text", value = "bob"',
+      "let myParam = config.get('myParam');",
+      "await page.fill('#inp', myParam);",
+      'await navigationEvent0;'
+    ])
+  })
+
+  it('keeps popup capture around a credential fill on the triggering page', () => {
+    const stack = new Stack()
+    stack.push('page')
+    const context = { page: 'page' }
+    const step = {
+      type: 'change',
+      value: 'joe',
+      inputType: 'text',
+      selectors: [['#inp'], ['aria/Username for field']],
+      assertedEvents: [{ type: 'navigation', isNewTabOrWindow: true }]
+    }
+
+    const result = buildAction(context, stack).handle(step)
+
+    expect(result).toContain("const username = config.get('username');")
+    expect(result).toContain("await page.fill('#inp', username);")
+    expect(result).toContain('const tab0 = await pageEvent0;')
+    expect(result).toContain("await tab0.waitForLoadState('domcontentloaded');")
+  })
+
   it('does not redeclare password on a second occurrence in the same conversion', () => {
     const action = buildAction()
     const step = {
@@ -161,8 +202,14 @@ describe('ChangeAction', () => {
       assertedEvents: [{ type: 'windowOrTabClose' }]
     }
 
-    buildAction(context, stack).handle(step)
+    const result = buildAction(context, stack).handle(step)
 
+    expect(result).toEqual([
+      "const pageCloseEvent0 = tab0.waitForEvent('close');",
+      '// inputType = "text", value = "x"',
+      "await tab0.fill('#inp', 'x');",
+      'await pageCloseEvent0;'
+    ])
     expect(stack.isEmpty()).toBe(true)
     expect(context.page).toBe('page')
   })

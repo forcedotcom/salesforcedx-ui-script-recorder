@@ -19,6 +19,11 @@ export class Stack {
     return this.items.pop()
   }
 
+  remove(element) {
+    const index = this.items.lastIndexOf(element)
+    if (index !== -1) this.items.splice(index, 1)
+  }
+
   peek() {
     return this.items[this.items.length - 1]
   }

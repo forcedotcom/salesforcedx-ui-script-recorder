@@ -7,23 +7,24 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
 */
 
 import { BaseAction } from './BaseAction.js'
+import { toJavaScriptStringLiteral } from './JavaScriptLiteral.js'
 
 export class AssertAction extends BaseAction {
   handle(step) {
     const selector = step.selectors?.find(sel => sel[0])?.[0]
     if (!selector) return []
 
+    const activePage = this.context.page
     const actions = []
-    const locator = `${this.context.page}.locator('${selector}')`
+    const locator = `${activePage}.locator(${toJavaScriptStringLiteral(selector)})`
 
     if (step.assertionType === 'containsText' && step.textContent) {
       const firstLine = step.textContent.split('\n')[0].trim()
-      const escaped = firstLine.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
-      actions.push(`await expect(${locator}).toContainText('${escaped}');`)
+      actions.push(`await expect(${locator}).toContainText(${toJavaScriptStringLiteral(firstLine)});`)
     } else {
       actions.push(`await expect(${locator}).toBeVisible();`)
     }
 
-    return actions
+    return this.wrapTriggeredPageClose(step, actions, activePage)
   }
 }

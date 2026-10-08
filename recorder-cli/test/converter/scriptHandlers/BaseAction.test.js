@@ -143,11 +143,30 @@ describe('BaseAction', () => {
         "const pageEvent0 = page.waitForEvent('popup');",
         '// tagName = "BUTTON"',
         "await page.click('#btn');",
-        'const tab0 = await pageEvent0;'
+        'const tab0 = await pageEvent0;',
+        "await tab0.waitForLoadState('domcontentloaded');"
       ])
       expect(stack.peek()).toBe('tab0')
       expect(context.page).toBe('tab0')
       expect(commonCounter.value).toBe(1)
+    })
+
+    it('waits for the final recorded popup URL after redirects', () => {
+      const stack = new Stack()
+      const context = { page: 'page' }
+      const action = new BaseAction(stack, context, { value: 0 })
+      const step = {
+        type: 'click',
+        selectors: [['#btn']],
+        assertedEvents: [{ type: 'navigation', url: 'https://example.com/final', isNewTabOrWindow: true }]
+      }
+
+      const result = action.handleNewTabOrWindow(step, 'click')
+
+      expect(result).toContain(
+        "await tab0.waitForURL(url => url.href === 'https://example.com/final', { waitUntil: 'domcontentloaded' });"
+      )
+      expect(result).not.toContain("await tab0.waitForLoadState('domcontentloaded');")
     })
 
     it('waits for navigation when the step asserts a navigation event', () => {
@@ -157,7 +176,29 @@ describe('BaseAction', () => {
 
       const result = action.handleNewTabOrWindow(step, 'click')
 
-      expect(result).toEqual(['', "await page.click('#btn');", "await page.waitForLoadState('domcontentloaded')"])
+      expect(result).toEqual([
+        "const navigationEvent0 = page.waitForNavigation({ waitUntil: 'domcontentloaded' });",
+        '',
+        "await page.click('#btn');",
+        'await navigationEvent0;'
+      ])
+    })
+
+    it('waits for the final recorded same-page URL after the first navigation', () => {
+      const context = { page: 'page' }
+      const action = new BaseAction(new Stack(), context, { value: 0 })
+      const step = {
+        type: 'click',
+        selectors: [['#btn']],
+        assertedEvents: [{ type: 'navigation', url: 'https://example.com/final' }]
+      }
+
+      const result = action.handleNewTabOrWindow(step, 'click')
+
+      expect(result.at(-2)).toBe('await navigationEvent0;')
+      expect(result.at(-1)).toBe(
+        "await page.waitForURL(url => url.href === 'https://example.com/final', { waitUntil: 'domcontentloaded' });"
+      )
     })
 
     it('skips the navigation wait when there is no navigation event', () => {

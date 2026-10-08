@@ -1,4 +1,6 @@
 import { AssertAction } from '../../../src/converter/scriptHandlers/AssertAction.js'
+import { BrowserContext } from '../../../src/converter/BrowserContext.js'
+import { Stack } from '../../../src/converter/Stack.js'
 
 describe('AssertAction', () => {
   const buildAction = () => new AssertAction(null, { page: 'page' })
@@ -38,5 +40,28 @@ describe('AssertAction', () => {
     const step = { selectors: [['#msg']], assertionType: 'visible', textContent: 'hello' }
 
     expect(action.handle(step)).toEqual(["await expect(page.locator('#msg')).toBeVisible();"])
+  })
+
+  it('replays a manual popup close after an assertion and restores the opener', () => {
+    const stack = new Stack()
+    stack.push('page')
+    stack.push('tab1')
+    const context = new BrowserContext()
+    context.page = 'tab1'
+    const action = new AssertAction(stack, context, { value: 2 }, { timingVersion: 2 })
+
+    expect(action.handle({
+      selectors: [['#status']],
+      explicitClose: true,
+      closeDelay: 750,
+      assertedEvents: [{ type: 'windowOrTabClose' }]
+    })).toEqual([
+      "await expect(tab1.locator('#status')).toBeVisible();",
+      'await delay(750)',
+      'if (!tab1.isClosed()) {',
+      '  await tab1.close();',
+      '}'
+    ])
+    expect(context.page).toBe('page')
   })
 })
