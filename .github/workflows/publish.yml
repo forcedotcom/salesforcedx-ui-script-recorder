@@ -238,7 +238,11 @@ jobs:
 
   attach-release-assets:
     name: Attach VSIX to release
-    if: github.event_name == 'release'
+    if: >-
+      always() &&
+      github.event_name == 'release' &&
+      (needs.publish-vscode.result == 'success' ||
+       needs.publish-openvsx.result == 'success')
     needs: [validate-release, publish-vscode, publish-openvsx]
     runs-on: ubuntu-latest
     permissions:
