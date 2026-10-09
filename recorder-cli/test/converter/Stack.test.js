@@ -24,6 +24,18 @@ describe('Stack', () => {
     expect(stack.isEmpty()).toBe(true)
   })
 
+  it('removes a specific item without disturbing later pages', () => {
+    const stack = new Stack()
+    stack.push('page')
+    stack.push('tab1')
+    stack.push('tab2')
+
+    stack.remove('tab1')
+
+    expect(stack.items).toEqual(['page', 'tab2'])
+    expect(stack.peek()).toBe('tab2')
+  })
+
   it('clears all items', () => {
     const stack = new Stack()
     stack.push('a')

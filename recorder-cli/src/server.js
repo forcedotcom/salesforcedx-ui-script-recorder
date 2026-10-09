@@ -21,13 +21,19 @@ export async function createServer() {
   const wss = new WebSocketServer({ server: httpServer })
 
   const clients = new Set()
+  let nextStreamNumber = 1
 
   wss.on('connection', (ws) => {
+    // FIFO delivery is guaranteed per socket, not per tab: iframes and a new
+    // document after navigation use independent connections. Tag each stream
+    // so the recorder can preserve FIFO locally while merging streams by the
+    // source event timestamp.
+    const streamId = `stream-${nextStreamNumber++}`
     clients.add(ws)
 
     ws.on('message', (data) => {
       try {
-        const msg = JSON.parse(data.toString())
+        const msg = { ...JSON.parse(data.toString()), __streamId: streamId }
 
         if (msg._type === 'overlay-action') {
           events.emit('overlay-action', msg)

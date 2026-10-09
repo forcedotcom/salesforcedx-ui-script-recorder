@@ -89,13 +89,18 @@ describe('finder', () => {
     expect(selector).toContain('unique-class')
   })
 
-  it('excludes disallowed SLDS classes via the finderOptions className evaluator', () => {
-    const target = el('div', { class: 'slds-is-active real-class' })
+  it('excludes disallowed and transient SLDS classes via the finderOptions className evaluator', () => {
+    const target = el('div', {
+      class: 'slds-is-active slds-is-open slds-has-selection real-class'
+    })
     append(target)
 
     const selector = finder(target, finderOptions)
 
     expect(selector).not.toContain('slds-is-active')
+    expect(selector).not.toContain('slds-is-open')
+    expect(selector).not.toContain('slds-has-selection')
+    expect(selector).toContain('real-class')
   })
 
   it('falls back to a tagName-based selector when id/attr/class do not distinguish', () => {

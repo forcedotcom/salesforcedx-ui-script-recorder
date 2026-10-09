@@ -28,6 +28,21 @@ const CLI_PATH = path.resolve(CLI_ROOT, 'recorder-cli', 'bin', 'cli.js')
 const MANUAL_CHOICE = { label: '$(globe) Enter a URL manually', mode: 'manual' }
 const CLI_CHOICE = { label: '$(key) Log in with a Salesforce CLI org', mode: 'cli' }
 const NEW_ORG_ITEM = { label: '$(add) Log in to a new org…', description: 'Opens a browser to authenticate via "sf org login web"', isNewOrg: true }
+const PRODUCTION_LOGIN_TARGET = {
+  label: '$(cloud) Production or Developer org',
+  description: 'login.salesforce.com',
+  instanceUrl: 'https://login.salesforce.com'
+}
+const SANDBOX_LOGIN_TARGET = {
+  label: '$(beaker) Sandbox org',
+  description: 'test.salesforce.com',
+  instanceUrl: 'https://test.salesforce.com'
+}
+const CUSTOM_LOGIN_TARGET = {
+  label: '$(globe) Custom login URL…',
+  description: 'Use My Domain or another Salesforce login host',
+  isCustom: true
+}
 
 afterEach(() => {
   jest.clearAllMocks()
@@ -290,10 +305,19 @@ describe('pickLoginMode — CLI org selection', () => {
 })
 
 describe('pickLoginMode — log in to a new org', () => {
-  function mockNewOrgLogin({ orgs = [], landingPath = '' } = {}) {
+  function mockNewOrgLogin({
+    orgs = [],
+    loginTarget = PRODUCTION_LOGIN_TARGET,
+    customUrl,
+    landingPath = ''
+  } = {}) {
     vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
     listSalesforceCliOrgs.mockResolvedValueOnce(orgs)
     vscode.window.showQuickPick.mockResolvedValueOnce(NEW_ORG_ITEM)
+    vscode.window.showQuickPick.mockResolvedValueOnce(loginTarget)
+    if (loginTarget.isCustom) {
+      vscode.window.showInputBox.mockResolvedValueOnce(customUrl)
+    }
     vscode.window.showInputBox.mockResolvedValueOnce(landingPath)
   }
 
@@ -308,7 +332,98 @@ describe('pickLoginMode — log in to a new org', () => {
       }),
       expect.any(Function)
     )
-    expect(loginToNewOrgViaCli).toHaveBeenCalledWith(expect.anything())
+    expect(loginToNewOrgViaCli).toHaveBeenCalledWith(
+      expect.anything(),
+      { instanceUrl: 'https://login.salesforce.com' }
+    )
+  })
+
+  it('offers production, sandbox, and custom login targets', async () => {
+    loginToNewOrgViaCli.mockResolvedValueOnce({ username: 'new@example.com', alias: null, instanceUrl: 'https://new' })
+    await reachSpawn(() => mockNewOrgLogin())
+
+    expect(vscode.window.showQuickPick.mock.calls[2]).toEqual([
+      [PRODUCTION_LOGIN_TARGET, SANDBOX_LOGIN_TARGET, CUSTOM_LOGIN_TARGET],
+      { placeHolder: 'Where does the org live?' }
+    ])
+  })
+
+  it('passes the sandbox login URL to the Salesforce CLI helper', async () => {
+    loginToNewOrgViaCli.mockResolvedValueOnce({ username: 'new@example.com', alias: null, instanceUrl: 'https://new' })
+    await reachSpawn(() => mockNewOrgLogin({ loginTarget: SANDBOX_LOGIN_TARGET }))
+
+    expect(loginToNewOrgViaCli).toHaveBeenCalledWith(
+      expect.anything(),
+      { instanceUrl: 'https://test.salesforce.com' }
+    )
+  })
+
+  it('normalizes a bare custom login host before passing it to the helper', async () => {
+    loginToNewOrgViaCli.mockResolvedValueOnce({ username: 'new@example.com', alias: null, instanceUrl: 'https://new' })
+    await reachSpawn(() => mockNewOrgLogin({
+      loginTarget: CUSTOM_LOGIN_TARGET,
+      customUrl: 'acme.my.salesforce.com'
+    }))
+
+    expect(loginToNewOrgViaCli).toHaveBeenCalledWith(
+      expect.anything(),
+      { instanceUrl: 'https://acme.my.salesforce.com' }
+    )
+  })
+
+  it('does nothing when the login-target picker is cancelled', async () => {
+    vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
+    listSalesforceCliOrgs.mockResolvedValueOnce([])
+    vscode.window.showQuickPick.mockResolvedValueOnce(NEW_ORG_ITEM)
+    vscode.window.showQuickPick.mockResolvedValueOnce(undefined)
+    const { handler } = getHandler()
+
+    await handler()
+
+    expect(loginToNewOrgViaCli).not.toHaveBeenCalled()
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when the custom-login URL prompt is cancelled', async () => {
+    vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
+    listSalesforceCliOrgs.mockResolvedValueOnce([])
+    vscode.window.showQuickPick.mockResolvedValueOnce(NEW_ORG_ITEM)
+    vscode.window.showQuickPick.mockResolvedValueOnce(CUSTOM_LOGIN_TARGET)
+    vscode.window.showInputBox.mockResolvedValueOnce(undefined)
+    const { handler } = getHandler()
+
+    await handler()
+
+    expect(loginToNewOrgViaCli).not.toHaveBeenCalled()
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('validates custom login URLs as HTTPS base URLs', async () => {
+    vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
+    listSalesforceCliOrgs.mockResolvedValueOnce([])
+    vscode.window.showQuickPick.mockResolvedValueOnce(NEW_ORG_ITEM)
+    vscode.window.showQuickPick.mockResolvedValueOnce(CUSTOM_LOGIN_TARGET)
+    vscode.window.showInputBox.mockResolvedValueOnce(undefined)
+    const { handler } = getHandler()
+
+    await handler()
+
+    const validateInput = vscode.window.showInputBox.mock.calls[0][0].validateInput
+    expect(validateInput('')).toBe('Enter a Salesforce login URL')
+    expect(validateInput('test.salesforce.com')).toBeNull()
+    expect(validateInput('https://acme.my.salesforce.com')).toBeNull()
+    expect(validateInput('http://test.salesforce.com')).toMatch(/valid HTTPS base URL/)
+    expect(validateInput('https://test.salesforce.com/path')).toMatch(/valid HTTPS base URL/)
+    expect(validateInput('https://acme.lightning.force.com')).toBe(
+      "Use the org's My Domain URL, not its Lightning URL"
+    )
+    expect(validateInput('https://acme.lightning.crmforce.mil')).toMatch(/My Domain URL/)
+    expect(validateInput('https://acme.lightning.sfcrmapps.cn')).toMatch(/My Domain URL/)
+    expect(validateInput('https://acme.lightning.stm.salesforce.com')).toMatch(/My Domain URL/)
+    expect(validateInput('https://acme.lightning.force.com.')).toMatch(/My Domain URL/)
+    expect(validateInput('https://ACME.LIGHTNING.FORCE.COM.:8443')).toMatch(/My Domain URL/)
+    expect(validateInput('https://lightning.my.salesforce.com')).toBeNull()
+    expect(validateInput('https://acme--uat.sandbox.my.salesforce.com')).toBeNull()
   })
 
   it('proceeds with the newly authenticated org on success', async () => {
@@ -324,6 +439,7 @@ describe('pickLoginMode — log in to a new org', () => {
     vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
     listSalesforceCliOrgs.mockResolvedValueOnce([])
     vscode.window.showQuickPick.mockResolvedValueOnce(NEW_ORG_ITEM)
+    vscode.window.showQuickPick.mockResolvedValueOnce(PRODUCTION_LOGIN_TARGET)
     const { handler } = getHandler()
 
     await handler()
@@ -337,6 +453,7 @@ describe('pickLoginMode — log in to a new org', () => {
     vscode.window.showQuickPick.mockResolvedValueOnce(CLI_CHOICE)
     listSalesforceCliOrgs.mockResolvedValueOnce([])
     vscode.window.showQuickPick.mockResolvedValueOnce(NEW_ORG_ITEM)
+    vscode.window.showQuickPick.mockResolvedValueOnce(PRODUCTION_LOGIN_TARGET)
     const { handler } = getHandler()
 
     await handler()

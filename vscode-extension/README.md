@@ -40,7 +40,7 @@ This downloads the correct platform-specific Playwright browser binary for your 
 
 **Command Palette:** `Salesforce UI Script Recorder: Start UI Recording`
 
-1. Opens a quick pick asking how to log in: an org already authenticated via the Salesforce CLI (`sf org login web` — no credentials or MFA prompt) or a manually entered URL
+1. Opens a quick pick asking how to log in: an org already authenticated via the Salesforce CLI (`sf org login web` — no credentials or MFA prompt) or a manually entered URL. When adding a CLI org, choose its login target: Production or Developer, Sandbox, or a custom login URL.
 2. Launches a Chromium browser navigated to that URL (or already logged into the chosen org)
 3. A progress notification appears — use the **in-browser overlay controls** or press **Cancel** to stop and save
 4. On completion, a notification shows how many events were recorded

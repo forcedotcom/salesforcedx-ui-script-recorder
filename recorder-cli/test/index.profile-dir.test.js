@@ -21,7 +21,13 @@ import { createServer } from '../src/server.js'
 import { buildInjectedScript } from '../src/build.js'
 import { convertToPlaywright } from '../src/playwright-converter.js'
 import { startRecording } from '../src/index.js'
-import { createFakeContext, createFakeServerInstance, flushAll, baseOptions } from './helpers/fakePlaywright.js'
+import {
+  createFakeContext,
+  createFakePage,
+  createFakeServerInstance,
+  flushAll,
+  baseOptions
+} from './helpers/fakePlaywright.js'
 
 describe('startRecording (profileDir / persistent context)', () => {
   let logSpy
@@ -47,7 +53,7 @@ describe('startRecording (profileDir / persistent context)', () => {
   })
 
   it('reuses an already-open page from the persistent context instead of opening a new one', async () => {
-    const context = createFakeContext({ pages: [{ existing: true }] })
+    const context = createFakeContext({ pages: [createFakePage()] })
     chromium.launchPersistentContext.mockResolvedValue(context)
 
     const promise = startRecording({ ...baseOptions, profileDir: './my-profile' })

@@ -45,7 +45,7 @@ describe('createServer', () => {
     const received = new Promise((resolve) => instance.events.once('message', resolve))
     ws.send(JSON.stringify({ _type: 'click', foo: 'bar' }))
 
-    expect(await received).toEqual({ _type: 'click', foo: 'bar' })
+    expect(await received).toEqual({ _type: 'click', foo: 'bar', __streamId: 'stream-1' })
     ws.close()
   })
 
@@ -56,7 +56,11 @@ describe('createServer', () => {
     const received = new Promise((resolve) => instance.events.once('overlay-action', resolve))
     ws.send(JSON.stringify({ _type: 'overlay-action', action: 'pause' }))
 
-    expect(await received).toEqual({ _type: 'overlay-action', action: 'pause' })
+    expect(await received).toEqual({
+      _type: 'overlay-action',
+      action: 'pause',
+      __streamId: 'stream-1'
+    })
     ws.close()
   })
 

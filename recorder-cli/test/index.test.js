@@ -75,7 +75,10 @@ describe('startRecording (happy path, regular browser launch)', () => {
     expect(context._cdpSession.send).toHaveBeenCalledWith('Page.enable')
     expect(context._cdpSession.send).toHaveBeenCalledWith(
       'Page.addScriptToEvaluateOnNewDocument',
-      expect.objectContaining({ worldName: 'SalesforceRecorderIsolated' })
+      expect.objectContaining({
+        worldName: 'SalesforceRecorderIsolated',
+        source: expect.stringContaining('tabId: "tab-1"')
+      })
     )
     expect(context._page.goto).toHaveBeenCalledWith('https://example.com/start')
     expect(context._page.title).toHaveBeenCalled()

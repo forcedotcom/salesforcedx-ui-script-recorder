@@ -70,6 +70,73 @@ describe('ChangeAction', () => {
     expect(result[result.length - 1]).toBe("await page.fill('#inp', 'x');")
   })
 
+  it('conditionally reopens a searchable combobox before filling its stable selector', () => {
+    const step = {
+      type: 'change',
+      value: 'Scale Testing',
+      tagName: 'INPUT',
+      inputType: 'text',
+      ensureComboboxOpen: true,
+      comboboxActivationSelector: '#team-closed',
+      selectors: [['#team-open'], ['aria/Team[role="combobox"]']]
+    }
+
+    expect(buildAction().handle(step)).toEqual([
+      '// tagName = "INPUT", inputType = "text", value = "Scale Testing", alternative selectors = [\'aria/Team[role="combobox"]\']',
+      "if (\n  (await page.locator('#team-closed').first().isVisible()) &&\n  (await page.locator('#team-closed').first().getAttribute('aria-expanded')) === 'false'\n) {\n  await page.locator('#team-closed').first().click();\n}",
+      "await page.fill('#team-open', 'Scale Testing');"
+    ])
+  })
+
+  it('does not add a reopen guard to an ordinary textbox', () => {
+    const step = {
+      type: 'change',
+      value: 'Scale Testing',
+      tagName: 'INPUT',
+      inputType: 'text',
+      selectors: [['#team'], ['aria/Team[role="textbox"]']]
+    }
+
+    const result = buildAction().handle(step)
+
+    expect(result).toHaveLength(2)
+    expect(result.some(line => line.includes('aria-expanded'))).toBe(false)
+  })
+
+  it('does not change an unmarked combobox fill', () => {
+    const step = {
+      type: 'change',
+      value: 'Scale Testing',
+      tagName: 'INPUT',
+      inputType: 'text',
+      selectors: [['input[aria-label="Team"]'], ['aria/Team[role="combobox"]']]
+    }
+
+    expect(buildAction().handle(step)).toEqual([
+      '// tagName = "INPUT", inputType = "text", value = "Scale Testing", alternative selectors = [\'aria/Team[role="combobox"]\']',
+      "await page.fill('input[aria-label=\"Team\"]', 'Scale Testing');"
+    ])
+  })
+
+  it('keeps the conditional reopen immediately before a parameterised combobox fill', () => {
+    const step = {
+      type: 'change',
+      value: 'Scale Testing',
+      tagName: 'INPUT',
+      inputType: 'text',
+      ensureComboboxOpen: true,
+      selectors: [['input[aria-label="Team"]'], ['aria/Team[role="combobox"]']],
+      params: { parameterise: true, paramName: 'team' }
+    }
+
+    expect(buildAction().handle(step)).toEqual([
+      '// tagName = "INPUT", inputType = "text", value = "Scale Testing", alternative selectors = [\'aria/Team[role="combobox"]\']',
+      "let team = config.get('team');",
+      "if (\n  (await page.locator('input[aria-label=\"Team\"]').first().isVisible()) &&\n  (await page.locator('input[aria-label=\"Team\"]').first().getAttribute('aria-expanded')) === 'false'\n) {\n  await page.locator('input[aria-label=\"Team\"]').first().click();\n}",
+      "await page.fill('input[aria-label=\"Team\"]', team);"
+    ])
+  })
+
   it('parameterises a text field with a generated config lookup', () => {
     const step = {
       type: 'change',
@@ -133,6 +200,47 @@ describe('ChangeAction', () => {
     ])
   })
 
+  it('replaces the fill without dropping a parameterised navigation wait', () => {
+    const step = {
+      type: 'change',
+      value: 'bob',
+      inputType: 'text',
+      selectors: [['#inp']],
+      params: { parameterise: true, paramName: 'myParam' },
+      assertedEvents: [{ type: 'navigation' }]
+    }
+
+    const result = buildAction().handle(step)
+
+    expect(result).toEqual([
+      "const navigationEvent0 = page.waitForNavigation({ waitUntil: 'domcontentloaded' });",
+      '// inputType = "text", value = "bob"',
+      "let myParam = config.get('myParam');",
+      "await page.fill('#inp', myParam);",
+      'await navigationEvent0;'
+    ])
+  })
+
+  it('keeps popup capture around a credential fill on the triggering page', () => {
+    const stack = new Stack()
+    stack.push('page')
+    const context = { page: 'page' }
+    const step = {
+      type: 'change',
+      value: 'joe',
+      inputType: 'text',
+      selectors: [['#inp'], ['aria/Username for field']],
+      assertedEvents: [{ type: 'navigation', isNewTabOrWindow: true }]
+    }
+
+    const result = buildAction(context, stack).handle(step)
+
+    expect(result).toContain("const username = config.get('username');")
+    expect(result).toContain("await page.fill('#inp', username);")
+    expect(result).toContain('const tab0 = await pageEvent0;')
+    expect(result).toContain("await tab0.waitForLoadState('domcontentloaded');")
+  })
+
   it('does not redeclare password on a second occurrence in the same conversion', () => {
     const action = buildAction()
     const step = {
@@ -161,8 +269,14 @@ describe('ChangeAction', () => {
       assertedEvents: [{ type: 'windowOrTabClose' }]
     }
 
-    buildAction(context, stack).handle(step)
+    const result = buildAction(context, stack).handle(step)
 
+    expect(result).toEqual([
+      "const pageCloseEvent0 = tab0.waitForEvent('close');",
+      '// inputType = "text", value = "x"',
+      "await tab0.fill('#inp', 'x');",
+      'await pageCloseEvent0;'
+    ])
     expect(stack.isEmpty()).toBe(true)
     expect(context.page).toBe('page')
   })

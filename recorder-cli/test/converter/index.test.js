@@ -14,6 +14,7 @@ describe('convertToPlaywright', () => {
     expect(output).toContain('page.setDefaultTimeout(5000)')
     expect(output).toContain("await page.goto('https://example.com')")
     expect(output).toContain('test.afterEach(async ({ page, context })')
+    expect(output).toContain("SALESFORCE_UI_SCRIPT_RECORDER_DISABLE_AUTH_PERSIST === '1'")
     expect(output).toContain("import { test, expect } from '@playwright/test'")
   })
 
@@ -41,7 +42,7 @@ describe('convertToPlaywright', () => {
 
     const output = await convertToPlaywright(data)
 
-    expect(output).toContain("await page.waitForLoadState('domcontentloaded')")
+    expect(output).toContain("page.waitForNavigation({ waitUntil: 'domcontentloaded' })")
     expect(output).not.toContain('identity/verification')
   })
 
@@ -62,6 +63,19 @@ describe('convertToPlaywright', () => {
 
     expect(output).toContain("await page.fill('#editor'")
     expect(() => new Function(scriptWithoutStaticImports)).not.toThrow()
+  })
+
+  it('emits a parseable test title when document text contains JavaScript syntax', async () => {
+    const data = {
+      title: "'); globalThis.__titleInjected = true; //\nsecond line",
+      steps: []
+    }
+
+    const output = await convertToPlaywright(data)
+    const scriptWithoutStaticImports = output.replace(/^\s*import\s.+;$/gm, '')
+
+    expect(() => new Function(scriptWithoutStaticImports)).not.toThrow()
+    expect(output).toContain("\\'")
   })
 
   it('replays a styled radio through its visible control and deterministic state change', async () => {
@@ -105,5 +119,29 @@ describe('convertToPlaywright', () => {
     const output = await convertToPlaywright(data)
 
     expect(output).toContain("page.locator('#notifications').setChecked(false == true)")
+  })
+
+  it('reopens a searchable combobox only when needed before filling its stable selector', async () => {
+    const data = {
+      title: 'Lookup search',
+      steps: [{
+        type: 'change',
+        selectors: [['input[aria-label="Team"]'], ['aria/Team[role="combobox"]']],
+        tagName: 'INPUT',
+        inputType: 'text',
+        ensureComboboxOpen: true,
+        comboboxActivationSelector: '#team-closed',
+        value: 'Scale Testing'
+      }]
+    }
+
+    const output = await convertToPlaywright(data)
+    const scriptWithoutStaticImports = output.replace(/^\s*import\s.+;$/gm, '')
+
+    expect(output).toContain("page.locator('#team-closed').first().isVisible()")
+    expect(output).toContain("getAttribute('aria-expanded')) === 'false'")
+    expect(output).toContain("await page.fill('input[aria-label=\"Team\"]', 'Scale Testing')")
+    expect(output).not.toContain('slds-is-open')
+    expect(() => new Function(scriptWithoutStaticImports)).not.toThrow()
   })
 })

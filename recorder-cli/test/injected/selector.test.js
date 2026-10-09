@@ -336,8 +336,10 @@ describe('getSelector', () => {
       expect(selectors[0]).toEqual(['div[aria-label="Good Label"]'])
     })
 
-    it('falls back to a class-based selector, filtering disallowed SLDS classes and keeping at most two', () => {
-      const target = el('button', { class: 'slds-is-active real-one real-two real-three' })
+    it('falls back to a class-based selector, filtering transient SLDS classes and keeping at most two', () => {
+      const target = el('button', {
+        class: 'slds-is-active slds-is-open slds-has-selection real-one real-two real-three'
+      })
       append(target)
 
       const selectors = getSelector({ target }, {})
@@ -346,7 +348,9 @@ describe('getSelector', () => {
     })
 
     it('falls back to a bare tag name when className is empty after filtering', () => {
-      const target = el('button', { class: 'slds-is-active slds-has-focus' })
+      const target = el('button', {
+        class: 'slds-is-active slds-has-focus slds-is-open slds-has-selection'
+      })
       append(target)
 
       const selectors = getSelector({ target }, {})

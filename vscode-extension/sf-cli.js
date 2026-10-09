@@ -81,15 +81,21 @@ function listSalesforceCliOrgs() {
  * Launch `sf org login web` to authenticate a new org via browser. Resolves
  * with the newly authenticated org once the flow completes in the browser.
  * @param {import('vscode').CancellationToken} [cancellationToken] - if provided and cancelled, kills the login process and rejects.
+ * @param {{ instanceUrl?: string|null }} [options] - optional Salesforce login host (for example, https://test.salesforce.com for a sandbox).
  * @returns {Promise<{ username: string, alias: string|null, instanceUrl: string }>}
  */
-function loginToNewOrgViaCli(cancellationToken) {
+function loginToNewOrgViaCli(cancellationToken, options = {}) {
   return new Promise((resolve, reject) => {
     let cancelled = false;
+    const args = ['org', 'login', 'web'];
+    if (options.instanceUrl) {
+      args.push('--instance-url', options.instanceUrl);
+    }
+    args.push('--json');
 
     const child = execFile(
       'sf',
-      ['org', 'login', 'web', '--json'],
+      args,
       { maxBuffer: 10 * 1024 * 1024, env: { ...process.env, PATH: getExtendedPath() } },
       (err, stdout, stderr) => {
         // Wait for the process to actually exit before settling, even on

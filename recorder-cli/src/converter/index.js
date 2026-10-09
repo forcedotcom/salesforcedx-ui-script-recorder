@@ -14,6 +14,7 @@ import { getImportsAndDeclarations } from './scriptHandlers/Header.js'
 import { getScriptBody } from './buildPlaywrightScript.js'
 import { timeoutDuration } from './constants.js'
 import { stripVerificationSteps } from './stripVerificationSteps.js'
+import { toJavaScriptStringLiteral } from './scriptHandlers/JavaScriptLiteral.js'
 
 /**
  * Convert a JSON user flow object to a Playwright test script string.
@@ -31,7 +32,7 @@ export async function convertToPlaywright(data) {
   const importsAndDeclarations = getImportsAndDeclarations()
   script.push(importsAndDeclarations)
 
-  const scriptStart = `test('${cleanedData.title}', async ({ page }) => {`
+  const scriptStart = `test(${toJavaScriptStringLiteral(cleanedData.title)}, async ({ page }) => {`
   script.push(scriptStart)
 
   script.push(`// --- Test setup ---`)
@@ -60,6 +61,7 @@ export async function convertToPlaywright(data) {
   // device and skips the MFA verification prompt — enabling unattended playback.
   const afterEachHook = `
 test.afterEach(async ({ page, context }) => {
+  if (process.env.SALESFORCE_UI_SCRIPT_RECORDER_DISABLE_AUTH_PERSIST === '1') return;
   const fs = await import('fs');
   const path = await import('path');
   const DEVICE_COOKIE_NAMES = ['sfdc_lv2', 'BrowserId', 'BrowserId_sec', 'CookieConsentPolicy', 'LSKey-c\$CookieConsentPolicy'];

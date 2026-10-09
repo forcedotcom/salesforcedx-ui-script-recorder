@@ -151,7 +151,7 @@ Record browser interactions and automatically generate a Playwright test script.
 
 1. Click the **+** button in the Recordings section of the sidebar, or open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **"Salesforce UI Script Recorder: Start UI Recording"**.
 2. Choose how to log in:
-   - **Log in with a Salesforce CLI org** — pick from orgs you've already authenticated via `sf org login web`. No password or MFA prompt; see [Log In via Salesforce CLI](#log-in-via-salesforce-cli-no-credentials-no-mfa). You'll also be asked for an optional landing path (e.g. `/lightning/o/Account/list`) — leave it empty to start on the org home page.
+   - **Log in with a Salesforce CLI org** — pick from orgs you've already authenticated via `sf org login web`, or choose **Log in to a new org…**. For a new org, select **Production or Developer**, **Sandbox**, or **Custom login URL** before completing the browser login. No password or MFA prompt is recorded; see [Log In via Salesforce CLI](#log-in-via-salesforce-cli-no-credentials-no-mfa). You'll also be asked for an optional landing path (e.g. `/lightning/o/Account/list`) — leave it empty to start on the org home page.
    - **Enter a URL manually** — the classic flow. Enter the URL you want to record against (e.g., your Salesforce org login page). Leave empty to default to `https://login.salesforce.com`. The extension auto-prepends `https://` if no protocol is provided.
 3. **If you entered a URL manually and multiple saved accounts exist for it**, a picker appears asking which account's authentication state to load. Select an existing account to skip device verification, or choose "New session" to start fresh.
 4. A browser window will launch with an overlay control bar at the top of the page, already logged in if you chose a CLI org.
@@ -374,10 +374,10 @@ Typing a username and password into the recorder breaks down for most real orgs 
 ```bash
 npm install --global @salesforce/cli
 sf org login web        # opens a browser to authenticate; completes any MFA/SSO challenge once
-sf org login web --alias my-sandbox   # repeat per additional org, with an optional alias
+sf org login web --instance-url https://test.salesforce.com --alias my-sandbox
 ```
 
-Once authenticated, the org stays available to the recorder until you `sf org logout` or the CLI's OAuth token is revoked — no need to log in again per recording or playback session.
+When starting a recording, **Log in to a new org…** provides the same production, sandbox, and custom login URL choices without requiring you to run these commands yourself. If your sandbox's login policy blocks `test.salesforce.com`, choose **Custom login URL…** and enter its My Domain URL (for example, `https://acme--uat.sandbox.my.salesforce.com`). Once authenticated, the org stays available to the recorder until you `sf org logout` or the CLI's OAuth token is revoked — no need to log in again per recording or playback session.
 
 ### Security notes
 

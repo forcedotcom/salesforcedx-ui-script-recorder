@@ -148,7 +148,11 @@ describe('startRecording (remaining generateUserFlow / filterSteps branch covera
 
     const flow = await writtenUserFlow()
 
-    expect(flow.steps).toContainEqual({ type: 'keyUp', target: 'main', key: 'Escape' })
+    expect(flow.steps).toContainEqual(expect.objectContaining({
+      type: 'keyUp',
+      target: 'main',
+      key: 'Escape'
+    }))
   })
 
   it('ignores a NAVIGATION event when there are no prior steps at all (RESTART wiped everything, no viewport re-recorded)', async () => {

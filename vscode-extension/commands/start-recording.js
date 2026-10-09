@@ -14,6 +14,126 @@ const { ensurePlaywrightConfig } = require('../ensure-playwright-config');
 const { resolveNodePath, getExtendedPath } = require('../resolve-node');
 const { listSalesforceCliOrgs, loginToNewOrgViaCli } = require('../sf-cli');
 
+const NEW_ORG_LOGIN_TARGETS = [
+  {
+    label: '$(cloud) Production or Developer org',
+    description: 'login.salesforce.com',
+    instanceUrl: 'https://login.salesforce.com',
+  },
+  {
+    label: '$(beaker) Sandbox org',
+    description: 'test.salesforce.com',
+    instanceUrl: 'https://test.salesforce.com',
+  },
+  {
+    label: '$(globe) Custom login URL…',
+    description: 'Use My Domain or another Salesforce login host',
+    isCustom: true,
+  },
+];
+
+const LIGHTNING_DOMAIN_SUFFIXES = [
+  'lightning.force.com',
+  'lightning.crmforce.mil',
+  'lightning.sfcrmapps.cn',
+];
+
+const INTERNAL_DOMAIN_SUFFIXES = [
+  'stm.salesforce.com',
+  'stm.force.com',
+  'blitz.salesforce.com',
+  'stm.salesforce.ms',
+  'pc-rnd.force.com',
+  'pc-rnd.salesforce.com',
+  'crm.dev',
+];
+
+function hasDomainSuffix(hostname, suffix) {
+  return hostname === suffix || hostname.endsWith(`.${suffix}`);
+}
+
+function isInternalHostname(hostname) {
+  return (
+    hostname.startsWith('gs1.') ||
+    hostname === 'localhost.sfdcdev' ||
+    hostname.startsWith('localhost.sfdcdev.') ||
+    hostname.includes('.localhost.sfdcdev.') ||
+    hostname.includes('.internal.') ||
+    hostname.includes('.vpod.') ||
+    INTERNAL_DOMAIN_SUFFIXES.some((suffix) => hasDomainSuffix(hostname, suffix))
+  );
+}
+
+function isDisallowedLightningHostname(hostname) {
+  const normalized = hostname.toLowerCase().replace(/\.+$/, '');
+  return (
+    LIGHTNING_DOMAIN_SUFFIXES.some((suffix) => hasDomainSuffix(normalized, suffix)) ||
+    (normalized.includes('.lightning.') && isInternalHostname(normalized))
+  );
+}
+
+function normalizeLoginUrl(value) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'https:' || !parsed.hostname) return null;
+    if (isDisallowedLightningHostname(parsed.hostname)) return null;
+    if (
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== '/' ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function validateLoginUrl(value) {
+  if (!value || !value.trim()) return 'Enter a Salesforce login URL';
+
+  const trimmed = value.trim();
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const { hostname } = new URL(candidate);
+    if (isDisallowedLightningHostname(hostname)) {
+      return 'Use the org\'s My Domain URL, not its Lightning URL';
+    }
+  } catch {}
+
+  return normalizeLoginUrl(value)
+    ? null
+    : 'Enter a valid HTTPS base URL, such as https://test.salesforce.com';
+}
+
+async function pickNewOrgLoginTarget() {
+  const target = await vscode.window.showQuickPick(NEW_ORG_LOGIN_TARGETS, {
+    placeHolder: 'Where does the org live?',
+  });
+  if (target === undefined) return null;
+
+  if (!target.isCustom) {
+    return { instanceUrl: target.instanceUrl };
+  }
+
+  const customUrl = await vscode.window.showInputBox({
+    title: 'Salesforce Login URL',
+    prompt: 'Enter the Salesforce login URL used to authenticate this org',
+    placeHolder: 'https://acme.my.salesforce.com',
+    validateInput: validateLoginUrl,
+  });
+  if (customUrl === undefined) return null;
+
+  return { instanceUrl: normalizeLoginUrl(customUrl) };
+}
+
 /**
  * Ask the user whether to log in via a Salesforce CLI-authenticated org
  * (no credentials/MFA needed) or by entering a URL and using the standard
@@ -94,6 +214,9 @@ async function pickLoginMode() {
 
   let chosenOrg = pickedOrg.org;
   if (pickedOrg.isNewOrg) {
+    const loginTarget = await pickNewOrgLoginTarget();
+    if (loginTarget === null) return null;
+
     try {
       chosenOrg = await vscode.window.withProgress(
         {
@@ -101,7 +224,7 @@ async function pickLoginMode() {
           title: 'Salesforce UI Script Recorder: Complete the login in your browser…',
           cancellable: true,
         },
-        (progress, token) => loginToNewOrgViaCli(token)
+        (progress, token) => loginToNewOrgViaCli(token, loginTarget)
       );
     } catch (err) {
       vscode.window.showErrorMessage(

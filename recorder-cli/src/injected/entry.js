@@ -22,6 +22,7 @@ import { Controller } from './controller.js'
   const config = window.__sfRecorderConfig || {}
   const wsPort = config.wsPort
   const dataAttribute = config.dataAttribute || ''
+  const tabId = config.tabId
 
   // --- State (replaces Vuex store) ---
   const state = {
@@ -74,15 +75,17 @@ import { Controller } from './controller.js'
   }
 
   function sendMessage(msg) {
+    const outgoingMessage = tabId == null ? msg : { ...msg, tabId }
     if (wsReady && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg))
+      ws.send(JSON.stringify(outgoingMessage))
     } else {
-      pendingMessages.push(msg)
+      pendingMessages.push(outgoingMessage)
     }
   }
 
   function sendOverlayAction(action) {
-    sendMessage({ _type: 'overlay-action', action })
+    const eventTime = Date.now()
+    sendMessage({ _type: 'overlay-action', action, eventTime, orderEventTime: eventTime })
   }
 
   // --- Initialize ---

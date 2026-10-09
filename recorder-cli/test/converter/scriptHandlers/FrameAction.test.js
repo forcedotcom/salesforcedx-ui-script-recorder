@@ -56,6 +56,74 @@ describe('FrameAction', () => {
     ])
   })
 
+  it('waits for same-page navigation triggered by a framed click', () => {
+    const action = buildAction()
+    const result = action.handle({
+      type: 'click',
+      frameSelectors: ['#frame1'],
+      selectors: [['#navigate']],
+      assertedEvents: [{ type: 'navigation' }]
+    })
+
+    expect(result).toEqual([
+      "const navigationEvent0 = page.waitForNavigation({ waitUntil: 'domcontentloaded' });",
+      "const frame0 = page.frameLocator('#frame1');",
+      "const frameAction0 = frame0.locator('#navigate');",
+      'await frameAction0.click()',
+      'await navigationEvent0;'
+    ])
+  })
+
+  it('waits for a framed close action and restores the opener', () => {
+    const stack = new Stack()
+    stack.push('page')
+    stack.push('tab0')
+    const context = { page: 'tab0' }
+    const action = buildAction(context, stack)
+
+    const result = action.handle({
+      type: 'click',
+      frameSelectors: ['#frame1'],
+      selectors: [['#close']],
+      assertedEvents: [{ type: 'windowOrTabClose' }]
+    })
+
+    expect(result).toEqual([
+      "const pageCloseEvent0 = tab0.waitForEvent('close');",
+      "const frame0 = tab0.frameLocator('#frame1');",
+      "const frameAction0 = frame0.locator('#close');",
+      'await frameAction0.click()',
+      'await pageCloseEvent0;'
+    ])
+    expect(stack.peek()).toBe('page')
+    expect(context.page).toBe('page')
+  })
+
+  it('waits for a popup opened by a framed action and switches to it', () => {
+    const stack = new Stack()
+    stack.push('page')
+    const context = { page: 'page' }
+    const action = buildAction(context, stack)
+
+    const result = action.handle({
+      type: 'click',
+      frameSelectors: ['#frame1'],
+      selectors: [['#open']],
+      assertedEvents: [{ type: 'navigation', isNewTabOrWindow: true }]
+    })
+
+    expect(result).toEqual([
+      "const pageEvent0 = page.waitForEvent('popup');",
+      "const frame0 = page.frameLocator('#frame1');",
+      "const frameAction0 = frame0.locator('#open');",
+      'await frameAction0.click()',
+      'const tab0 = await pageEvent0;',
+      "await tab0.waitForLoadState('domcontentloaded');"
+    ])
+    expect(stack.peek()).toBe('tab0')
+    expect(context.page).toBe('tab0')
+  })
+
   it('uses parent-scoped text for a positional list option inside a frame', () => {
     const action = buildAction()
     const result = action.handle({
@@ -82,6 +150,24 @@ describe('FrameAction', () => {
     expect(result.some(line => line.includes('.click('))).toBe(true)
   })
 
+  it('does not wrap popup handling twice when delegating a selector-less click', () => {
+    const stack = new Stack()
+    stack.push('page')
+    const context = { page: 'page' }
+    const action = buildAction(context, stack)
+    const result = action.handle({
+      type: 'click',
+      frameSelectors: ['#frame1'],
+      assertedEvents: [{ type: 'navigation', isNewTabOrWindow: true }]
+    })
+
+    expect(result.filter(line => line.includes("waitForEvent('popup')"))).toHaveLength(1)
+    expect(result.filter(line => line.startsWith('const tab'))).toHaveLength(1)
+    expect(stack.size()).toBe(2)
+    expect(stack.peek()).toBe('tab0')
+    expect(context.page).toBe('tab0')
+  })
+
   it('discards nothing extra when the delegated ClickAction has no output', () => {
     const spy = jest.spyOn(ClickAction.prototype, 'handle').mockReturnValueOnce(null)
     const action = buildAction()
@@ -105,6 +191,46 @@ describe('FrameAction', () => {
       "const frame0 = page.frameLocator('#frame1');",
       "const frameAction0 = frame0.locator('#inp');",
       "await frameAction0.fill('hello');"
+    ])
+  })
+
+  it('conditionally reopens a framed searchable combobox before filling it', () => {
+    const action = buildAction()
+    const result = action.handle({
+      type: 'change',
+      tagName: 'INPUT',
+      inputType: 'text',
+      ensureComboboxOpen: true,
+      comboboxActivationSelector: '#team-closed',
+      frameSelectors: ['#frame1'],
+      value: 'Scale Testing',
+      selectors: [['#team-open'], ['aria/Team[role="combobox"]']]
+    })
+
+    expect(result).toEqual([
+      "const frame0 = page.frameLocator('#frame1');",
+      "const frameAction0 = frame0.locator('#team-open');",
+      "if (\n  (await frame0.locator('#team-closed').first().isVisible()) &&\n  (await frame0.locator('#team-closed').first().getAttribute('aria-expanded')) === 'false'\n) {\n  await frame0.locator('#team-closed').first().click();\n}",
+      "await frameAction0.fill('Scale Testing');"
+    ])
+  })
+
+  it('waits for same-page navigation triggered by a framed change', () => {
+    const action = buildAction()
+    const result = action.handle({
+      type: 'change',
+      frameSelectors: ['#frame1'],
+      selectors: [['#search']],
+      value: 'query',
+      assertedEvents: [{ type: 'navigation' }]
+    })
+
+    expect(result).toEqual([
+      "const navigationEvent0 = page.waitForNavigation({ waitUntil: 'domcontentloaded' });",
+      "const frame0 = page.frameLocator('#frame1');",
+      "const frameAction0 = frame0.locator('#search');",
+      "await frameAction0.fill('query');",
+      'await navigationEvent0;'
     ])
   })
 

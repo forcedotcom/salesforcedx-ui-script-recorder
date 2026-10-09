@@ -24,7 +24,10 @@ export const dataAttributes = new Set([
 
 export const otherAttributes = new Set(['name', 'title', 'type', 'aria-label'])
 
-const notAllowedSldsClasses = new Set(['slds-is-active', 'slds-has-focus', 'highlighted', 'slds-is-selected'])
+const notAllowedSldsClasses = new Set([
+  'slds-is-active', 'slds-has-focus', 'highlighted', 'slds-is-selected',
+  'slds-is-open', 'slds-has-selection'
+])
 const selectorTypesToRecord = [
   /*'aria',*/
   'text'

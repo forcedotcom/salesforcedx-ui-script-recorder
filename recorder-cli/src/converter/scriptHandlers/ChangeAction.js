@@ -11,6 +11,30 @@ import { toJavaScriptStringLiteral } from './JavaScriptLiteral.js'
 
 // Track which credential variables have already been declared within a single conversion
 const declaredVars = new Set()
+const volatileSldsSelectorPattern = /\.(?:slds-is-open|slds-has-selection)(?![\w-])/
+const comboboxRoleSelectorPattern = /\[role=(?:"combobox"|'combobox'|combobox)\]/i
+
+export function getComboboxActivationSelector(step) {
+  return step?.comboboxActivationSelector ||
+    step?.selectors?.find(selector => selector?.[0])?.[0]
+}
+
+export function isSearchableComboboxChange(step) {
+  if (step?.type !== 'change' || step.tagName !== 'INPUT' || step.ensureComboboxOpen !== true) return false
+
+  const primarySelector = step.selectors?.find(selector => selector?.[0])?.[0]
+  const activationSelector = getComboboxActivationSelector(step)
+  if (!primarySelector || !activationSelector ||
+      volatileSldsSelectorPattern.test(activationSelector)) return false
+
+  return step.selectors?.some(selector =>
+    selector?.some(part => typeof part === 'string' && comboboxRoleSelectorPattern.test(part))
+  ) === true
+}
+
+export function buildComboboxOpenGuard(locatorExpression) {
+  return `if (\n  (await ${locatorExpression}.first().isVisible()) &&\n  (await ${locatorExpression}.first().getAttribute('aria-expanded')) === 'false'\n) {\n  await ${locatorExpression}.first().click();\n}`
+}
 
 export class ChangeAction extends BaseAction {
   static resetDeclaredVars() {
@@ -18,31 +42,43 @@ export class ChangeAction extends BaseAction {
   }
 
   handle(step) {
+    const triggeringPage = this.context.page
     const actions = this.handleNewTabOrWindow(step, 'fill', step.value)
     const selector = step.selectors?.find(sel => sel[0])?.[0]
     const ariaSelector = step.selectors?.find(sel => sel[0]?.startsWith('aria'))?.[0]
 
     if (ariaSelector && this._isUsernameOrPassword(ariaSelector)) {
-      this._buildUsernameAndPassword(selector, ariaSelector, actions)
+      this._buildUsernameAndPassword(selector, ariaSelector, actions, triggeringPage)
     }
 
     if (step.params?.parameterise) {
       const paramName = step.params.paramName
       if (paramName) {
         const paramAction = `let ${paramName} = config.get('${paramName}');`
-        actions.splice(1, 0, paramAction)
+        this.insertBeforePrimaryAction(actions, paramAction, triggeringPage)
         if (step.inputType === 'checkbox' || step.inputType === 'radio') {
-          actions[actions.length - 1] = `await ${this.context.page}.locator(${toJavaScriptStringLiteral(selector)}).setChecked(${paramName} == "true");`
+          this.replacePrimaryAction(
+            actions,
+            `await ${triggeringPage}.locator(${toJavaScriptStringLiteral(selector)}).setChecked(${paramName} == "true");`,
+            triggeringPage
+          )
         } else {
-          actions[actions.length - 1] = `await ${this.context.page}.fill(${toJavaScriptStringLiteral(selector)}, ${paramName});`
+          this.replacePrimaryAction(
+            actions,
+            `await ${triggeringPage}.fill(${toJavaScriptStringLiteral(selector)}, ${paramName});`,
+            triggeringPage
+          )
         }
       }
     }
 
-    if (step.assertedEvents?.some(event => event.type === 'windowOrTabClose')) {
-      this.handleWindowOrTabClose()
+    if (selector && isSearchableComboboxChange(step)) {
+      const activationSelector = getComboboxActivationSelector(step)
+      const locator = `${triggeringPage}.locator(${toJavaScriptStringLiteral(activationSelector)})`
+      this.insertBeforePrimaryAction(actions, buildComboboxOpenGuard(locator), triggeringPage)
     }
-    return actions
+
+    return this.wrapTriggeredPageClose(step, actions, triggeringPage)
   }
 
   _isUsernameOrPassword(ariaSelector) {
@@ -50,19 +86,27 @@ export class ChangeAction extends BaseAction {
     return prefixes.some(prefix => ariaSelector.startsWith(prefix))
   }
 
-  _buildUsernameAndPassword(selector, ariaSelector, actions) {
+  _buildUsernameAndPassword(selector, ariaSelector, actions, activePage = this.context.page) {
     if (ariaSelector.startsWith('aria/Username')) {
       if (!declaredVars.has('username')) {
-        actions.splice(1, 0, `const username = config.get('username');`)
+        this.insertBeforePrimaryAction(actions, `const username = config.get('username');`, activePage)
         declaredVars.add('username')
       }
-      actions[actions.length - 1] = `await ${this.context.page}.fill(${toJavaScriptStringLiteral(selector)}, username);`
+      this.replacePrimaryAction(
+        actions,
+        `await ${activePage}.fill(${toJavaScriptStringLiteral(selector)}, username);`,
+        activePage
+      )
     } else {
       if (!declaredVars.has('password')) {
-        actions.splice(1, 0, `const password = config.get('password');`)
+        this.insertBeforePrimaryAction(actions, `const password = config.get('password');`, activePage)
         declaredVars.add('password')
       }
-      actions[actions.length - 1] = `await ${this.context.page}.fill(${toJavaScriptStringLiteral(selector)}, password);`
+      this.replacePrimaryAction(
+        actions,
+        `await ${activePage}.fill(${toJavaScriptStringLiteral(selector)}, password);`,
+        activePage
+      )
     }
   }
 }

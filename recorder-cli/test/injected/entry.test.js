@@ -101,7 +101,13 @@ describe('injected entry point', () => {
 
     ws.onopen()
 
-    expect(ws.sent).toEqual([JSON.stringify({ _type: 'overlay-action', action: 'PAUSE' })])
+    expect(ws.sent).toHaveLength(1)
+    expect(JSON.parse(ws.sent[0])).toEqual(expect.objectContaining({
+      _type: 'overlay-action',
+      action: 'PAUSE',
+      eventTime: expect.any(Number),
+      orderEventTime: expect.any(Number)
+    }))
   })
 
   it('sends immediately once the socket is open and ready', async () => {
@@ -110,7 +116,31 @@ describe('injected entry point', () => {
 
     overlayOpts.sendOverlayAction('STOP')
 
-    expect(ws.sent).toEqual([JSON.stringify({ _type: 'overlay-action', action: 'STOP' })])
+    expect(ws.sent).toHaveLength(1)
+    expect(JSON.parse(ws.sent[0])).toEqual(expect.objectContaining({
+      _type: 'overlay-action',
+      action: 'STOP',
+      eventTime: expect.any(Number),
+      orderEventTime: expect.any(Number)
+    }))
+  })
+
+  it('adds the configured tab id to queued and immediate messages', async () => {
+    window.__sfRecorderConfig = { wsPort: 4321, tabId: 'tab-2' }
+    const { ws, recorderOpts, overlayOpts } = await loadEntry()
+
+    recorderOpts.sendMessage({ action: 'click' })
+    ws.onopen()
+    overlayOpts.sendOverlayAction('STOP')
+
+    expect(JSON.parse(ws.sent[0])).toEqual({ action: 'click', tabId: 'tab-2' })
+    expect(JSON.parse(ws.sent[1])).toEqual(expect.objectContaining({
+      _type: 'overlay-action',
+      action: 'STOP',
+      tabId: 'tab-2',
+      eventTime: expect.any(Number),
+      orderEventTime: expect.any(Number)
+    }))
   })
 
   it('queues again after the socket closes, and reconnects after a delay', async () => {
