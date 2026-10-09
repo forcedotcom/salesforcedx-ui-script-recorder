@@ -8,7 +8,12 @@ For full license text, see LICENSE.txt file in the repo root or http://www.apach
 
 import { BaseAction } from './BaseAction.js'
 import { ClickAction, preferScopedTextForFragileListClick } from './ClickAction.js'
-import { ChangeAction } from './ChangeAction.js'
+import {
+  ChangeAction,
+  buildComboboxOpenGuard,
+  getComboboxActivationSelector,
+  isSearchableComboboxChange
+} from './ChangeAction.js'
 import { toJavaScriptStringLiteral } from './JavaScriptLiteral.js'
 
 export class FrameAction extends BaseAction {
@@ -55,6 +60,11 @@ export class FrameAction extends BaseAction {
         const changeSelector = step.selectors?.find(selector => selector?.[0])?.[0]
         if (changeSelector) {
           frameActions.push(`const frameAction${this.frameAction} = frame${this.frameCount}.locator(${toJavaScriptStringLiteral(changeSelector)});`)
+          if (isSearchableComboboxChange(step)) {
+            const activationSelector = getComboboxActivationSelector(step)
+            const activationLocator = `frame${this.frameCount}.locator(${toJavaScriptStringLiteral(activationSelector)})`
+            frameActions.push(buildComboboxOpenGuard(activationLocator))
+          }
           if (step.inputType === 'checkbox' || step.inputType === 'radio') {
             frameActions.push(`await frameAction${this.frameAction}.setChecked(${step.value} == true);`)
           } else if (step.inputType === 'select-one') {

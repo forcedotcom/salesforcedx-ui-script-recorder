@@ -23,7 +23,8 @@ import { dataAttributes, otherAttributes } from './selector.js'
 import { OVERLAY_ID } from './constants.js'
 
 const notAllowedSldsClasses = new Set([
-  'slds-is-active', 'slds-has-focus', 'highlighted', 'slds-is-selected'
+  'slds-is-active', 'slds-has-focus', 'highlighted', 'slds-is-selected',
+  'slds-is-open', 'slds-has-selection'
 ])
 
 const attributeEvaluator = (name, value) =>

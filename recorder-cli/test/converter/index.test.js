@@ -120,4 +120,28 @@ describe('convertToPlaywright', () => {
 
     expect(output).toContain("page.locator('#notifications').setChecked(false == true)")
   })
+
+  it('reopens a searchable combobox only when needed before filling its stable selector', async () => {
+    const data = {
+      title: 'Lookup search',
+      steps: [{
+        type: 'change',
+        selectors: [['input[aria-label="Team"]'], ['aria/Team[role="combobox"]']],
+        tagName: 'INPUT',
+        inputType: 'text',
+        ensureComboboxOpen: true,
+        comboboxActivationSelector: '#team-closed',
+        value: 'Scale Testing'
+      }]
+    }
+
+    const output = await convertToPlaywright(data)
+    const scriptWithoutStaticImports = output.replace(/^\s*import\s.+;$/gm, '')
+
+    expect(output).toContain("page.locator('#team-closed').first().isVisible()")
+    expect(output).toContain("getAttribute('aria-expanded')) === 'false'")
+    expect(output).toContain("await page.fill('input[aria-label=\"Team\"]', 'Scale Testing')")
+    expect(output).not.toContain('slds-is-open')
+    expect(() => new Function(scriptWithoutStaticImports)).not.toThrow()
+  })
 })

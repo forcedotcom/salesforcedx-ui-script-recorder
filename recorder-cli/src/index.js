@@ -1321,6 +1321,7 @@ export function generateUserFlow(events, options) {
           ...(coordinates && { offsetX: coordinates.x, offsetY: coordinates.y }),
           tagName,
           inputType,
+          recordingTargetId,
           ...timing,
           ...(parentSelectors && { parentSelectors, componentType }),
           ...(event.frameIndex && { frame: event.frameIndex })
@@ -1455,7 +1456,9 @@ export function generateUserFlow(events, options) {
 
   // Calculate replay timing only after duplicate/keyboard filtering. This
   // keeps discarded raw events from shortening the gaps between real actions.
-  const filteredSteps = applyStepDurations(filterSteps(steps))
+  const filteredSteps = applyStepDurations(
+    promoteAdjacentComboboxClickSelectors(filterSteps(steps))
+  )
 
   return {
     title: `Recording - ${new Date().toISOString()}`,
@@ -1639,6 +1642,95 @@ function resolveAuthStatePath(saveAuth, recording, url) {
 
   const sanitizedUsername = username.replace(/[/\\:*?"<>|]/g, '_')
   return path.join(authDir, `${hostname}---${sanitizedUsername}.json`)
+}
+
+const volatileSldsSelectorPattern = /\.(?:slds-is-open|slds-has-selection)(?![\w-])/
+const comboboxRoleSelectorPattern = /\[role=(?:"combobox"|'combobox'|combobox)\]/i
+
+function selectorAlternatives(step) {
+  return (step?.selectors || []).filter(selector =>
+    Array.isArray(selector) && selector.some(part => typeof part === 'string' && part.length > 0)
+  )
+}
+
+function comboboxAriaIdentity(step) {
+  return selectorAlternatives(step)
+    .flat()
+    .find(selector => selector.startsWith('aria/') && comboboxRoleSelectorPattern.test(selector))
+}
+
+function isExecutableCssSelector(selector) {
+  return Boolean(selector) && !/^(?:aria|css|pierce|text|xpath)\//.test(selector)
+}
+
+function stableExecutableSelectors(step) {
+  return selectorAlternatives(step).filter(selector =>
+    isExecutableCssSelector(selector[0]) &&
+    selector.every(part => !volatileSldsSelectorPattern.test(part))
+  )
+}
+
+function sameReplayContext(first, second) {
+  return first?.target === second?.target &&
+    first?.__tabId === second?.__tabId &&
+    first?.frame === second?.frame &&
+    JSON.stringify(first?.frameSelectors) === JSON.stringify(second?.frameSelectors)
+}
+
+function preferComboboxActivationSelectors(activation, change) {
+  if (activation?.type !== 'click' || change?.type !== 'change' ||
+      activation.tagName !== 'INPUT' || change.tagName !== 'INPUT' ||
+      activation.__timingBoundaryAfter || activation.assertedEvents?.length > 0 ||
+      !sameReplayContext(activation, change)) return change
+
+  const activationIdentity = comboboxAriaIdentity(activation)
+  const changeIdentity = comboboxAriaIdentity(change)
+  if (!changeIdentity) return change
+
+  const sameRecordedElement = activation.recordingTargetId != null &&
+    activation.recordingTargetId === change.recordingTargetId
+  const sameAccessibleIdentity = Boolean(activationIdentity) &&
+    activationIdentity === changeIdentity
+  if (!sameRecordedElement && !sameAccessibleIdentity) return change
+
+  const activationSelectors = stableExecutableSelectors(activation)
+  if (activationSelectors.length === 0) return change
+
+  const changeSelectors = selectorAlternatives(change)
+  const mergedSelectors = []
+  const seenSelectors = new Set()
+  const executableChangeSelectors = changeSelectors.filter(selector =>
+    isExecutableCssSelector(selector[0])
+  )
+  const remainingChangeSelectors = changeSelectors.filter(selector =>
+    !isExecutableCssSelector(selector[0])
+  )
+  for (const selector of [
+    ...executableChangeSelectors,
+    ...activationSelectors,
+    ...remainingChangeSelectors
+  ]) {
+    const key = JSON.stringify(selector)
+    if (!seenSelectors.has(key)) {
+      seenSelectors.add(key)
+      mergedSelectors.push(selector)
+    }
+  }
+
+  return {
+    ...change,
+    selectors: mergedSelectors,
+    ensureComboboxOpen: true,
+    comboboxActivationSelector: activationSelectors[0][0]
+  }
+}
+
+function promoteAdjacentComboboxClickSelectors(steps) {
+  return steps.map((step, index) =>
+    step.type === 'change'
+      ? preferComboboxActivationSelectors(steps[index - 1], step)
+      : step
+  )
 }
 
 function filterSteps(steps) {

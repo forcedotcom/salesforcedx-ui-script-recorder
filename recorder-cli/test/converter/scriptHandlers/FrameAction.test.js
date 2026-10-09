@@ -194,6 +194,27 @@ describe('FrameAction', () => {
     ])
   })
 
+  it('conditionally reopens a framed searchable combobox before filling it', () => {
+    const action = buildAction()
+    const result = action.handle({
+      type: 'change',
+      tagName: 'INPUT',
+      inputType: 'text',
+      ensureComboboxOpen: true,
+      comboboxActivationSelector: '#team-closed',
+      frameSelectors: ['#frame1'],
+      value: 'Scale Testing',
+      selectors: [['#team-open'], ['aria/Team[role="combobox"]']]
+    })
+
+    expect(result).toEqual([
+      "const frame0 = page.frameLocator('#frame1');",
+      "const frameAction0 = frame0.locator('#team-open');",
+      "if (\n  (await frame0.locator('#team-closed').first().isVisible()) &&\n  (await frame0.locator('#team-closed').first().getAttribute('aria-expanded')) === 'false'\n) {\n  await frame0.locator('#team-closed').first().click();\n}",
+      "await frameAction0.fill('Scale Testing');"
+    ])
+  })
+
   it('waits for same-page navigation triggered by a framed change', () => {
     const action = buildAction()
     const result = action.handle({

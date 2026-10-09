@@ -422,6 +422,105 @@ describe('getScriptBody', () => {
     }
   })
 
+  it.each([
+    ['does not repeat a successful activation click', 'true', 1],
+    ['retries one swallowed activation click', 'false', 2],
+    ['does not guess that a missing aria-expanded attribute means closed', null, 1]
+  ])('%s for a marked searchable combobox', async (_name, stateAfterFirstClick, expectedClicks) => {
+    let expanded = 'false'
+    let clicks = 0
+    const fills = []
+    const activate = async () => {
+      clicks++
+      expanded = clicks === 1 ? stateAfterFirstClick : 'true'
+    }
+    const activationLocator = {
+      first() { return this },
+      isVisible: async () => true,
+      getAttribute: async attribute => attribute === 'aria-expanded' ? expanded : null,
+      click: activate
+    }
+    const page = {
+      click: activate,
+      fill: async (selector, value) => fills.push([selector, value]),
+      locator: () => activationLocator
+    }
+    const source = getScriptBody({
+      steps: [
+        {
+          type: 'click',
+          selectors: [['input[aria-label="Team"]']],
+          tagName: 'INPUT',
+          inputType: 'text'
+        },
+        {
+          type: 'change',
+          selectors: [['input[aria-label="Team"]'], ['aria/Team[role="combobox"]']],
+          tagName: 'INPUT',
+          inputType: 'text',
+          ensureComboboxOpen: true,
+          value: 'Scale Testing'
+        }
+      ]
+    })
+
+    const execute = new Function('page', `return (async () => {${source}})()`)
+    await execute(page)
+
+    expect(clicks).toBe(expectedClicks)
+    expect(fills).toEqual([['input[aria-label="Team"]', 'Scale Testing']])
+  })
+
+  it('fills the post-open input when a successful click replaces the activator', async () => {
+    let activationVisible = true
+    let activationAttributeRead = false
+    const fills = []
+    const activate = async () => {
+      activationVisible = false
+    }
+    const page = {
+      click: activate,
+      fill: async (selector, value) => fills.push([selector, value]),
+      locator: selector => {
+        const locator = {
+          first() { return this },
+          isVisible: async () => selector === '#team-closed' ? activationVisible : true,
+          getAttribute: async () => {
+            activationAttributeRead = true
+            throw new Error('the replaced activator must not be queried')
+          },
+          click: activate
+        }
+        return locator
+      }
+    }
+    const source = getScriptBody({
+      steps: [
+        {
+          type: 'click',
+          selectors: [['#team-closed']],
+          tagName: 'INPUT',
+          inputType: 'text'
+        },
+        {
+          type: 'change',
+          selectors: [['div.slds-is-open #team-open'], ['aria/Team[role="combobox"]']],
+          tagName: 'INPUT',
+          inputType: 'text',
+          ensureComboboxOpen: true,
+          comboboxActivationSelector: '#team-closed',
+          value: 'Scale Testing'
+        }
+      ]
+    })
+
+    const execute = new Function('page', `return (async () => {${source}})()`)
+    await execute(page)
+
+    expect(activationAttributeRead).toBe(false)
+    expect(fills).toEqual([['div.slds-is-open #team-open', 'Scale Testing']])
+  })
+
   it('keeps malicious frame and child selectors inside string literals', async () => {
     const frameSelector = "iframe[title=\"x'); globalThis.__frameInjected = true; //\"]"
     const clickSelector = "#button'); globalThis.__frameInjected = true; //"

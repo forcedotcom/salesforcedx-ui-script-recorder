@@ -70,6 +70,73 @@ describe('ChangeAction', () => {
     expect(result[result.length - 1]).toBe("await page.fill('#inp', 'x');")
   })
 
+  it('conditionally reopens a searchable combobox before filling its stable selector', () => {
+    const step = {
+      type: 'change',
+      value: 'Scale Testing',
+      tagName: 'INPUT',
+      inputType: 'text',
+      ensureComboboxOpen: true,
+      comboboxActivationSelector: '#team-closed',
+      selectors: [['#team-open'], ['aria/Team[role="combobox"]']]
+    }
+
+    expect(buildAction().handle(step)).toEqual([
+      '// tagName = "INPUT", inputType = "text", value = "Scale Testing", alternative selectors = [\'aria/Team[role="combobox"]\']',
+      "if (\n  (await page.locator('#team-closed').first().isVisible()) &&\n  (await page.locator('#team-closed').first().getAttribute('aria-expanded')) === 'false'\n) {\n  await page.locator('#team-closed').first().click();\n}",
+      "await page.fill('#team-open', 'Scale Testing');"
+    ])
+  })
+
+  it('does not add a reopen guard to an ordinary textbox', () => {
+    const step = {
+      type: 'change',
+      value: 'Scale Testing',
+      tagName: 'INPUT',
+      inputType: 'text',
+      selectors: [['#team'], ['aria/Team[role="textbox"]']]
+    }
+
+    const result = buildAction().handle(step)
+
+    expect(result).toHaveLength(2)
+    expect(result.some(line => line.includes('aria-expanded'))).toBe(false)
+  })
+
+  it('does not change an unmarked combobox fill', () => {
+    const step = {
+      type: 'change',
+      value: 'Scale Testing',
+      tagName: 'INPUT',
+      inputType: 'text',
+      selectors: [['input[aria-label="Team"]'], ['aria/Team[role="combobox"]']]
+    }
+
+    expect(buildAction().handle(step)).toEqual([
+      '// tagName = "INPUT", inputType = "text", value = "Scale Testing", alternative selectors = [\'aria/Team[role="combobox"]\']',
+      "await page.fill('input[aria-label=\"Team\"]', 'Scale Testing');"
+    ])
+  })
+
+  it('keeps the conditional reopen immediately before a parameterised combobox fill', () => {
+    const step = {
+      type: 'change',
+      value: 'Scale Testing',
+      tagName: 'INPUT',
+      inputType: 'text',
+      ensureComboboxOpen: true,
+      selectors: [['input[aria-label="Team"]'], ['aria/Team[role="combobox"]']],
+      params: { parameterise: true, paramName: 'team' }
+    }
+
+    expect(buildAction().handle(step)).toEqual([
+      '// tagName = "INPUT", inputType = "text", value = "Scale Testing", alternative selectors = [\'aria/Team[role="combobox"]\']',
+      "let team = config.get('team');",
+      "if (\n  (await page.locator('input[aria-label=\"Team\"]').first().isVisible()) &&\n  (await page.locator('input[aria-label=\"Team\"]').first().getAttribute('aria-expanded')) === 'false'\n) {\n  await page.locator('input[aria-label=\"Team\"]').first().click();\n}",
+      "await page.fill('input[aria-label=\"Team\"]', team);"
+    ])
+  })
+
   it('parameterises a text field with a generated config lookup', () => {
     const step = {
       type: 'change',

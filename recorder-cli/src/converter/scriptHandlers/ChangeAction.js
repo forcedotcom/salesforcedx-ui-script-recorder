@@ -11,6 +11,30 @@ import { toJavaScriptStringLiteral } from './JavaScriptLiteral.js'
 
 // Track which credential variables have already been declared within a single conversion
 const declaredVars = new Set()
+const volatileSldsSelectorPattern = /\.(?:slds-is-open|slds-has-selection)(?![\w-])/
+const comboboxRoleSelectorPattern = /\[role=(?:"combobox"|'combobox'|combobox)\]/i
+
+export function getComboboxActivationSelector(step) {
+  return step?.comboboxActivationSelector ||
+    step?.selectors?.find(selector => selector?.[0])?.[0]
+}
+
+export function isSearchableComboboxChange(step) {
+  if (step?.type !== 'change' || step.tagName !== 'INPUT' || step.ensureComboboxOpen !== true) return false
+
+  const primarySelector = step.selectors?.find(selector => selector?.[0])?.[0]
+  const activationSelector = getComboboxActivationSelector(step)
+  if (!primarySelector || !activationSelector ||
+      volatileSldsSelectorPattern.test(activationSelector)) return false
+
+  return step.selectors?.some(selector =>
+    selector?.some(part => typeof part === 'string' && comboboxRoleSelectorPattern.test(part))
+  ) === true
+}
+
+export function buildComboboxOpenGuard(locatorExpression) {
+  return `if (\n  (await ${locatorExpression}.first().isVisible()) &&\n  (await ${locatorExpression}.first().getAttribute('aria-expanded')) === 'false'\n) {\n  await ${locatorExpression}.first().click();\n}`
+}
 
 export class ChangeAction extends BaseAction {
   static resetDeclaredVars() {
@@ -46,6 +70,12 @@ export class ChangeAction extends BaseAction {
           )
         }
       }
+    }
+
+    if (selector && isSearchableComboboxChange(step)) {
+      const activationSelector = getComboboxActivationSelector(step)
+      const locator = `${triggeringPage}.locator(${toJavaScriptStringLiteral(activationSelector)})`
+      this.insertBeforePrimaryAction(actions, buildComboboxOpenGuard(locator), triggeringPage)
     }
 
     return this.wrapTriggeredPageClose(step, actions, triggeringPage)

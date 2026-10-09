@@ -242,6 +242,214 @@ describe('startRecording -> generateUserFlow / filterSteps (via recorded message
     expect(radioSteps.map(({ type }) => type)).toEqual(['click', 'change'])
   })
 
+  it.each(['Team', 'Project'])(
+    'guards the pre-open %s activator while preserving a replaced post-open input for filling',
+    async (label) => {
+      const stableCssSelector = [
+        `div.slds-combobox > div.slds-combobox__form-element input[aria-label="${label}"]`
+      ]
+      const stableAriaSelector = [`aria/${label}[role="combobox"]`]
+      const postOpenCssSelector = [
+        'div.slds-is-open > div.slds-combobox__form-element input[type="text"]'
+      ]
+
+      emit({
+        action: 'click',
+        selectors: [stableCssSelector, stableAriaSelector],
+        tagName: 'INPUT',
+        inputType: 'text',
+        recordingTargetId: `closed-${label}`
+      })
+      emit({
+        action: 'input',
+        selectors: [
+          postOpenCssSelector,
+          stableAriaSelector
+        ],
+        tagName: 'INPUT',
+        inputType: 'text',
+        // Lightning can replace the input while opening the lookup.
+        recordingTargetId: `open-${label}`,
+        value: 'Scale Testing'
+      })
+
+      const flow = await writtenUserFlow()
+      const change = flow.steps.find(step =>
+        step.type === 'change' && step.selectors?.some(selector => selector[0] === stableAriaSelector[0])
+      )
+
+      expect(change.selectors[0]).toEqual(postOpenCssSelector)
+      expect(change.selectors).toContainEqual(stableCssSelector)
+      expect(change.selectors).toContainEqual(stableAriaSelector)
+      expect(change.ensureComboboxOpen).toBe(true)
+      expect(change.comboboxActivationSelector).toBe(stableCssSelector[0])
+    }
+  )
+
+  it('promotes the stable combobox selector after repeated typed values are deduplicated', async () => {
+    const stableAriaSelector = ['aria/Team[role="combobox"]']
+    const transientSelectors = [
+      ['div.slds-is-open > div.slds-combobox__form-element input[type="text"]'],
+      stableAriaSelector
+    ]
+    emit({
+      action: 'click',
+      selectors: [['input[aria-label="Team"]'], stableAriaSelector],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'closed-team'
+    })
+    emit({
+      action: 'input',
+      selectors: transientSelectors,
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'open-team',
+      value: 'S'
+    })
+    emit({
+      action: 'input',
+      selectors: transientSelectors,
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'open-team',
+      value: 'Scale Testing'
+    })
+
+    const flow = await writtenUserFlow()
+    const changes = flow.steps.filter(step => step.type === 'change' && step.tagName === 'INPUT')
+
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({
+      selectors: [
+        ['div.slds-is-open > div.slds-combobox__form-element input[type="text"]'],
+        ['input[aria-label="Team"]'],
+        stableAriaSelector
+      ],
+      value: 'Scale Testing',
+      ensureComboboxOpen: true,
+      comboboxActivationSelector: 'input[aria-label="Team"]'
+    })
+  })
+
+  it('does not borrow an adjacent combobox click selector with a different accessible identity', async () => {
+    emit({
+      action: 'click',
+      selectors: [['#team-before-open'], ['aria/Team[role="combobox"]']],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'team'
+    })
+    emit({
+      action: 'input',
+      selectors: [['#project-after-open'], ['aria/Project[role="combobox"]']],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'project',
+      value: 'Scale Testing'
+    })
+
+    const flow = await writtenUserFlow()
+    const change = flow.steps.find(step => step.type === 'change' && step.value === 'Scale Testing')
+
+    expect(change.selectors[0]).toEqual(['#project-after-open'])
+  })
+
+  it('marks a stable combobox transition so replay can retry a swallowed activation click', async () => {
+    const stableSelectors = [
+      ['input[aria-label="Team"]'],
+      ['aria/Team[role="combobox"]']
+    ]
+    emit({
+      action: 'click',
+      selectors: stableSelectors,
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'team'
+    })
+    emit({
+      action: 'input',
+      selectors: stableSelectors,
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'team',
+      value: 'Scale Testing'
+    })
+
+    const flow = await writtenUserFlow()
+    const change = flow.steps.find(step => step.type === 'change' && step.value === 'Scale Testing')
+
+    expect(change.selectors).toEqual(stableSelectors)
+    expect(change.ensureComboboxOpen).toBe(true)
+    expect(change.comboboxActivationSelector).toBe('input[aria-label="Team"]')
+  })
+
+  it('keeps a stable post-open selector for filling when opening replaces the input', async () => {
+    emit({
+      action: 'click',
+      selectors: [['#team-closed'], ['aria/Team[role="combobox"]']],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'closed-team'
+    })
+    emit({
+      action: 'input',
+      selectors: [['div.slds-is-open #team-open'], ['aria/Team[role="combobox"]']],
+      tagName: 'INPUT',
+      inputType: 'text',
+      recordingTargetId: 'open-team',
+      value: 'Scale Testing'
+    })
+
+    const flow = await writtenUserFlow()
+    const change = flow.steps.find(step => step.type === 'change' && step.value === 'Scale Testing')
+
+    expect(change).toMatchObject({
+      selectors: [
+        ['div.slds-is-open #team-open'],
+        ['#team-closed'],
+        ['aria/Team[role="combobox"]']
+      ],
+      ensureComboboxOpen: true,
+      comboboxActivationSelector: '#team-closed'
+    })
+  })
+
+  it('does not correlate combobox actions across a same-page navigation', () => {
+    const flow = generateUserFlow([
+      {
+        action: 'click',
+        selectors: [['#old-team'], ['aria/Team[role="combobox"]']],
+        tagName: 'INPUT',
+        inputType: 'text',
+        recordingTargetId: 'old-team',
+        tabId: 'main',
+        eventTime: 1000
+      },
+      {
+        action: 'NAVIGATION',
+        value: 'https://example.com/next',
+        tabId: 'main',
+        eventTime: 1100
+      },
+      {
+        action: 'input',
+        selectors: [['#new-team'], ['aria/Team[role="combobox"]']],
+        tagName: 'INPUT',
+        inputType: 'text',
+        recordingTargetId: 'new-team',
+        tabId: 'main',
+        eventTime: 1200,
+        value: 'Scale Testing'
+      }
+    ], {})
+    const change = flow.steps.find(step => step.type === 'change')
+
+    expect(change.selectors[0]).toEqual(['#new-team'])
+    expect(change.ensureComboboxOpen).toBeUndefined()
+    expect(change.comboboxActivationSelector).toBeUndefined()
+  })
+
   it('dedupes a rapid same-value change when only the transient CSS selector changed', async () => {
     const stableAriaSelector = ['aria/Product Tag[role="textbox"]']
     emit({
